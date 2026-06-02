@@ -1,0 +1,74 @@
+/* src/pages/UserDashboard.css */
+.dashboard-wrapper {
+  min-height: 100vh;
+  background-color: #f4f6f8;
+  font-family: 'Segoe UI', Roboto, sans-serif;
+  color: #4a4e69;
+  padding: 40px 20px;
+}
+
+.dashboard-container {
+  max-width: 700px;
+  margin: 0 auto;
+}
+
+.dashboard-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 30px;
+}
+
+.dashboard-header h2 {
+  font-size: 26px;
+  font-weight: 600;
+  margin: 0;
+}
+
+.logout-btn {
+  background-color: transparent;
+  border: 1px solid #9a8c98;
+  color: #9a8c98;
+  padding: 8px 16px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-weight: 500;
+  transition: all 0.3s ease;
+}
+
+.logout-btn:hover {
+  background-color: #9a8c98;
+  color: #ffffff;
+}
+
+.log-card {
+  background: #ffffff;
+  border-radius: 16px;
+  padding: 30px;
+  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.02);
+  margin-bottom: 25px;
+}
+
+.section-title {
+  font-size: 18px;
+  font-weight: 600;
+  margin-top: 0;
+  margin-bottom: 20px;
+  color: #4a4e69;
+}
+
+.submit-log-btn {
+  background-color: #81b29a;
+  color: white;
+  border: none;
+  padding: 10px 18px;
+  border-radius: 8px;
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 0.3s ease;
+}
+
+.submit-log-btn:hover {
+  background-color: #6b9b84;
+}
