@@ -2,10 +2,11 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabaseClient';
 import { useAuth } from '../context/AuthContext';
-import './Login.css'; // Import the new CSS file
+import MindTrackLogo from '../components/MindTrackLogo'; // Import the new logo
+import './Login.css'; 
 
 const Login = () => {
-  const [isSignUp, setIsSignUp] = useState(false); // Toggles between Login and Sign Up
+  const [isSignUp, setIsSignUp] = useState(false); 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [fullName, setFullName] = useState('');
@@ -15,7 +16,6 @@ const Login = () => {
   const { user, role } = useAuth();
   const navigate = useNavigate();
 
-  // Redirect users if they are already logged in
   useEffect(() => {
     if (user && role) {
       if (role === 'admin') navigate('/admin-dashboard');
@@ -30,7 +30,6 @@ const Login = () => {
     setErrorMsg('');
 
     if (isSignUp) {
-      // --- SIGN UP LOGIC ---
       if (!fullName) {
         setErrorMsg('Please enter your full name.');
         setLoading(false);
@@ -49,7 +48,6 @@ const Login = () => {
       if (error) setErrorMsg(error.message);
       else alert('Account created! You can now sign in.');
     } else {
-      // --- SIGN IN LOGIC ---
       const { error } = await supabase.auth.signInWithPassword({ email, password });
       if (error) setErrorMsg(error.message);
     }
@@ -60,7 +58,11 @@ const Login = () => {
   return (
     <div className="login-wrapper">
       <div className="login-card">
-        <h2 className="login-title">
+        
+        {/* BRAND LOGO HEADER INTEGRATION */}
+        <MindTrackLogo showText={true} className="logo-display-center" />
+
+        <h2 className="login-title" style={{ marginTop: '15px' }}>
           {isSignUp ? 'Create an Account' : 'Welcome Back'}
         </h2>
         <p className="login-subtitle">
@@ -70,8 +72,6 @@ const Login = () => {
         {errorMsg && <div className="error-message">{errorMsg}</div>}
         
         <form className="login-form" onSubmit={handleSubmit}>
-          
-          {/* Only show Full Name field if they are signing up */}
           {isSignUp && (
             <div className="input-group">
               <label>Full Name</label>
@@ -118,11 +118,11 @@ const Login = () => {
           {isSignUp ? "Already have an account?" : "Don't have an account?"} 
           <span onClick={() => {
             setIsSignUp(!isSignUp);
-            setErrorMsg(''); // Clear errors when switching modes
+            setErrorMsg(''); 
           }}>
             {isSignUp ? 'Sign In here' : 'Sign Up here'}
           </span>
-
+          
           {!isSignUp && (
             <div style={{ marginTop: '15px', borderTop: '1px solid #e9ecef', paddingTop: '15px' }}>
               Are you a mental health practitioner? <br />

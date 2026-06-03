@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabaseClient';
-import './Login.css'; // Reuses your calm design aesthetic rules
+import MindTrackLogo from '../components/MindTrackLogo'; // Import the new logo
+import './Login.css'; 
 
 const ProfessionalRegister = () => {
   const [email, setEmail] = useState('');
@@ -9,30 +10,36 @@ const ProfessionalRegister = () => {
   const [fullName, setFullName] = useState('');
   const [professionType, setProfessionType] = useState('Counselor');
   const [licenseNumber, setLicenseNumber] = useState('');
+  const [selectedFile, setSelectedFile] = useState(null); 
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
   
   const navigate = useNavigate();
+
+  const handleFileChange = (e) => {
+    if (e.target.files && e.target.files[0]) {
+      setSelectedFile(e.target.files[0]);
+    }
+  };
 
   const handleRegister = async (e) => {
     e.preventDefault();
     setLoading(true);
     setErrorMsg('');
 
-    if (!fullName || !licenseNumber) {
-      setErrorMsg('Please populate all clinical configuration inputs.');
+    if (!fullName || !licenseNumber || !selectedFile) {
+      setErrorMsg('Please complete all fields and attach your verification document.');
       setLoading(false);
       return;
     }
 
-    // 1. Sign up the user inside Supabase Auth with professional metadata tags
     const { data: authData, error: authError } = await supabase.auth.signUp({
       email,
       password,
       options: {
         data: {
           full_name: fullName,
-          role: 'professional' // Handled by your database trigger path
+          role: 'professional'
         }
       }
     });
@@ -43,32 +50,58 @@ const ProfessionalRegister = () => {
       return;
     }
 
-    // 2. Insert the validation variables into public.verification_requests
-    if (authData?.user) {
+    try {
+      let documentPublicUrl = null;
+
+      if (authData?.user && selectedFile) {
+        const fileExt = selectedFile.name.split('.').pop();
+        const fileName = `${authData.user.id}-${Date.now()}.${fileExt}`;
+        const filePath = `credentials/${fileName}`;
+
+        const { error: uploadError } = await supabase.storage
+          .from('verification-documents')
+          .upload(filePath, selectedFile);
+
+        if (uploadError) throw uploadError;
+
+        const { data: urlData } = supabase.storage
+          .from('verification-documents')
+          .getPublicUrl(filePath);
+
+        documentPublicUrl = urlData.publicUrl;
+      }
+
       const { error: dbError } = await supabase
         .from('verification_requests')
         .insert([{
           professional_id: authData.user.id,
           profession_type: professionType,
           license_number: licenseNumber,
-          status: 'pending' // Defaults to pending audit
+          document_url: documentPublicUrl,
+          status: 'pending'
         }]);
 
-      if (dbError) {
-        setErrorMsg(dbError.message);
-      } else {
-        alert('Application submitted successfully! An administrator will audit your profile credentials before your access is granted.');
-        navigate('/login');
-      }
+      if (dbError) throw dbError;
+
+      alert('Application and credentials submitted successfully! Admin will audit your document shortly.');
+      navigate('/login');
+
+    } catch (err) {
+      setErrorMsg(err.message || 'An error occurred during onboarding file generation.');
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   };
 
   return (
     <div className="login-wrapper">
       <div className="login-card" style={{ maxWidth: '450px' }}>
-        <h2 className="login-title">Practitioner Portal</h2>
-        <p className="login-subtitle">Register your clinical credentials to request system entry.</p>
+        
+        {/* BRAND LOGO HEADER INTEGRATION */}
+        <MindTrackLogo showText={true} className="logo-display-center" />
+
+        <h2 className="login-title" style={{ marginTop: '15px' }}>Practitioner Portal</h2>
+        <p className="login-subtitle">Register your credentials and upload your practicing certificate.</p>
 
         {errorMsg && <div className="error-message">{errorMsg}</div>}
 
@@ -88,8 +121,13 @@ const ProfessionalRegister = () => {
           </div>
 
           <div className="input-group">
-            <label>Medical License / Certification Number</label>
+            <label>Medical License Number</label>
             <input type="text" value={licenseNumber} onChange={(e) => setLicenseNumber(e.target.value)} className="login-input" placeholder="e.g. MGC-12345" required />
+          </div>
+
+          <div className="input-group">
+            <label>Verification Document (PDF or Image)</label>
+            <input type="file" accept=".pdf, image/*" onChange={handleFileChange} className="login-input" style={{ padding: '8px' }} required />
           </div>
 
           <div className="input-group">
@@ -103,7 +141,7 @@ const ProfessionalRegister = () => {
           </div>
 
           <button type="submit" disabled={loading} className="login-button">
-            {loading ? 'Submitting Application...' : 'Submit Credentials'}
+            {loading ? 'Uploading Files & Submitting...' : 'Submit Application'}
           </button>
         </form>
 

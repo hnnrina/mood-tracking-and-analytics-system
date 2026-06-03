@@ -1,12 +1,11 @@
 import { useEffect, useState } from 'react';
 import { supabase } from '../lib/supabaseClient';
-import "./UserDashboard.css"; // Inherits matching layout elements cleanly
+import "./UserDashboard.css"; 
 
 const AdminDashboard = () => {
   const [requests, setRequests] = useState([]);
   const [loading, setLoading] = useState(true);
 
-  // Fetch pending review items from the database with foreign relations
   const fetchPendingRequests = async () => {
     setLoading(true);
     try {
@@ -19,15 +18,12 @@ const AdminDashboard = () => {
           status,
           created_at,
           professional_id,
+          document_url,
           profile ( full_name )
         `)
         .eq('status', 'pending');
 
       if (error) throw error;
-
-      // Diagnostic tracker to monitor incoming data schemas
-      console.log("Pending Applications Loaded:", data); 
-      
       setRequests(data);
     } catch (error) {
       console.error('Error fetching system audit payloads:', error.message);
@@ -49,7 +45,7 @@ const AdminDashboard = () => {
 
       if (error) throw error;
       alert(`Account has been successfully ${newStatus}.`);
-      fetchPendingRequests(); // Refresh layout lists automatically
+      fetchPendingRequests(); 
     } catch (error) {
       alert('Audit submission failed: ' + error.message);
     }
@@ -57,7 +53,7 @@ const AdminDashboard = () => {
 
   return (
     <div className="dashboard-wrapper">
-      <div className="dashboard-container" style={{ maxWidth: '850px' }}>
+      <div className="dashboard-container" style={{ maxWidth: '950px' }}>
         <div className="dashboard-header">
           <h2>Administrative Governance Dashboard</h2>
           <button onClick={() => supabase.auth.signOut()} className="logout-btn">Log Out</button>
@@ -79,12 +75,12 @@ const AdminDashboard = () => {
                   <th style={{ padding: '12px' }}>Applicant</th>
                   <th>Specialty</th>
                   <th>License ID</th>
+                  <th>Attached File</th> {/* NEW HEADER COLUMN */}
                   <th style={{ textAlign: 'center' }}>Actions</th>
                 </tr>
               </thead>
               <tbody>
                 {requests.map((req) => {
-                  // Defensive Extraction Check: Safely pull full_name whether returned as an object or array wrapper
                   const applicantName = Array.isArray(req.profile)
                     ? req.profile[0]?.full_name
                     : req.profile?.full_name;
@@ -96,19 +92,27 @@ const AdminDashboard = () => {
                       </td>
                       <td>{req.profession_type}</td>
                       <td style={{ fontFamily: 'monospace', color: '#e07a5f' }}>{req.license_number}</td>
+                      
+                      <td>
+                        {req.document_url ? (
+                          <a 
+                            href={req.document_url} 
+                            target="_blank" 
+                            rel="noopener noreferrer" 
+                            style={{ color: '#81b29a', fontWeight: '600', textDecoration: 'underline' }}
+                          >
+                            View Certificate
+                          </a>
+                        ) : (
+                          <span style={{ color: '#8d99ae' }}>No Document</span>
+                        )}
+                      </td>
+
                       <td style={{ display: 'flex', gap: '10px', justifyContent: 'center', padding: '15px 12px' }}>
-                        <button 
-                          onClick={() => handleAuditAction(req.id, 'approved')} 
-                          className="submit-log-btn" 
-                          style={{ margin: 0, padding: '8px 14px', fontSize: '14px' }}
-                        >
+                        <button onClick={() => handleAuditAction(req.id, 'approved')} className="submit-log-btn" style={{ margin: 0, padding: '8px 14px', fontSize: '14px' }}>
                           Approve Access
                         </button>
-                        <button 
-                          onClick={() => handleAuditAction(req.id, 'rejected')} 
-                          className="logout-btn" 
-                          style={{ padding: '8px 14px', fontSize: '14px', color: '#d63031', borderColor: '#d63031' }}
-                        >
+                        <button onClick={() => handleAuditAction(req.id, 'rejected')} className="logout-btn" style={{ padding: '8px 14px', fontSize: '14px', color: '#d63031', borderColor: '#d63031' }}>
                           Reject
                         </button>
                       </td>

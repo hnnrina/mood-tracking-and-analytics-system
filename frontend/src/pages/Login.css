@@ -1,126 +1,142 @@
 /* src/pages/Login.css */
+
+/* Full viewport wrapping alignment grid */
 .login-wrapper {
   display: flex;
-  align-items: center;
   justify-content: center;
+  align-items: center;
+  width: 100%;
   min-height: 100vh;
-  /* A very soft, calming gray-blue gradient */
-  background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
-  font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  background-color: #f4f6f8;
+  box-sizing: border-box;
+  padding: 24px;
 }
 
+/* Polished modern card container */
 .login-card {
   background: #ffffff;
-  padding: 40px;
   border-radius: 16px;
-  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.05);
+  padding: 40px;
   width: 100%;
-  max-width: 400px;
+  max-width: 420px;
+  box-shadow: 0 10px 30px rgba(129, 178, 154, 0.04), 0 2px 8px rgba(0, 0, 0, 0.01);
+  box-sizing: border-box;
 }
 
+/* Master alignment container for the logo asset */
+.logo-display-center {
+  margin-bottom: 24px;
+}
+
+/* Clear, bold header tracking variables */
 .login-title {
-  text-align: center;
-  color: #4a4e69;
-  margin-bottom: 10px;
   font-size: 24px;
-  font-weight: 600;
-}
-
-.login-subtitle {
+  font-weight: 700;
+  color: #4a4e69;
+  margin: 0 0 6px 0;
   text-align: center;
-  color: #8d99ae;
-  margin-bottom: 30px;
-  font-size: 14px;
+  letter-spacing: -0.01em;
 }
 
+/* Balanced subtitle block spacing */
+.login-subtitle {
+  font-size: 14px;
+  color: #8d99ae;
+  margin: 0 0 32px 0;
+  text-align: center;
+  line-height: 1.5;
+}
+
+/* Form layouts */
 .login-form {
-  display: flex;
-  flex-direction: column;
+  text-align: left;
 }
 
 .input-group {
-  margin-bottom: 18px;
+  margin-bottom: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
 }
 
 .input-group label {
-  display: block;
-  margin-bottom: 6px;
+  font-size: 13px;
+  font-weight: 600;
   color: #4a4e69;
-  font-size: 14px;
-  font-weight: 500;
 }
 
 .login-input {
   width: 100%;
-  padding: 12px;
+  padding: 12px 14px;
   border: 1px solid #dcdde1;
   border-radius: 8px;
   font-size: 14px;
   background-color: #f8f9fa;
   color: #4a4e69;
-  transition: all 0.3s ease;
+  transition: all 0.2s ease;
   box-sizing: border-box;
 }
 
+/* SAGE GREEN FOCUS RING OVERRIDE */
 .login-input:focus {
-  outline: none;
   border-color: #81b29a;
   background-color: #ffffff;
-  box-shadow: 0 0 0 3px rgba(129, 178, 154, 0.2);
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(129, 178, 154, 0.15);
 }
 
-.login-input::placeholder {
-  color: #a0aab2;
-  opacity: 1; /* Ensures browser defaults don't fade it too much */
-}
-
+/* SAGE GREEN MAIN BUTTON OVERRIDE */
 .login-button {
-  background-color: #81b29a; /* Soft Sage Green */
+  width: 100%;
+  padding: 14px;
+  background-color: #81b29a; /* Sage Green */
   color: #ffffff;
   border: none;
   border-radius: 8px;
-  padding: 14px;
-  font-size: 16px;
+  font-size: 15px;
   font-weight: 600;
   cursor: pointer;
-  transition: background-color 0.3s ease;
+  transition: background-color 0.2s ease, transform 0.1s ease;
   margin-top: 10px;
 }
 
 .login-button:hover {
-  background-color: #6b9b84;
+  background-color: #6b9b84; /* Deep Sage Green */
 }
 
-.login-button:disabled {
-  background-color: #b2c9be;
-  cursor: not-allowed;
+.login-button:active {
+  transform: scale(0.99);
 }
 
-.error-message {
-  background-color: #ffeaa7;
-  color: #d63031;
-  padding: 10px;
-  border-radius: 8px;
-  font-size: 14px;
-  margin-bottom: 20px;
-  text-align: center;
-}
-
+/* SAGE GREEN LINK TEXT OVERRIDE */
 .toggle-mode {
-  text-align: center;
-  margin-top: 25px;
-  font-size: 14px;
+  margin-top: 28px;
+  font-size: 13px;
   color: #8d99ae;
+  text-align: center;
+  line-height: 1.6;
 }
 
 .toggle-mode span {
-  color: #81b29a;
+  color: #81b29a; /* Sage Green Links */
   font-weight: 600;
   cursor: pointer;
-  margin-left: 5px;
-  text-decoration: underline;
+  margin-left: 4px;
 }
 
 .toggle-mode span:hover {
+  text-decoration: underline;
   color: #6b9b84;
+}
+
+.error-message {
+  background-color: #ffeef0;
+  color: #d63031;
+  padding: 12px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 500;
+  margin-bottom: 20px;
+  text-align: center;
+  border: 1px solid #ffdadf;
 }
