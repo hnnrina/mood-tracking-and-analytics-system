@@ -51,10 +51,10 @@
   white-space: nowrap;
 }
 
-.sidebar-link-item hover, 
+.sidebar-link-item:hover, 
 .sidebar-link-item.active {
   background-color: #f2f7f5;
-  color: #81b29a; /* Transition into Calm Sage Green */
+  color: #81b29a;
 }
 
 .sidebar-link-item.active {
@@ -65,7 +65,7 @@
   width: 22px;
   height: 22px;
   flex-shrink: 0;
-  stroke: currentColor; /* Enforces alignment with parent text state color colors */
+  stroke: currentColor;
   fill: none;
   stroke-width: 2;
   stroke-linecap: round;
@@ -73,7 +73,7 @@
   transition: stroke 0.2s ease;
 }
 
-/* --- TOP personal NAVIGATION BAR --- */
+/* --- MAIN WORKSPACE HEADERS & NAVBAR --- */
 .dashboard-main-content {
   flex: 1;
   display: flex;
@@ -118,7 +118,7 @@
   color: #4a4e69;
 }
 
-/* --- personal PHOTO POPUP MENU --- */
+/* --- PROFILE DROPDOWN MENU --- */
 .profile-menu-container {
   position: relative;
 }
@@ -201,7 +201,7 @@
   background-color: #fff5f5;
 }
 
-/* --- MOOD CALENDAR VIEW --- */
+/* --- USER OPERATIONAL DASHBOARD HERO GRID --- */
 .workspace-view {
   padding: 40px;
   max-width: 1050px;
@@ -223,32 +223,155 @@
   margin: 0;
 }
 
-.calendar-nav-buttons {
-  display: flex;
-  gap: 10px;
+.dashboard-hero-grid {
+  display: grid;
+  grid-template-columns: 320px 1fr;
+  gap: 24px;
+  margin-bottom: 28px;
 }
 
-.cal-arrow-btn {
+.wellness-gauge-card {
   background: #ffffff;
-  border: 1px solid #dcdde1;
-  padding: 8px 16px;
+  border-radius: 16px;
+  padding: 24px;
+  border: 1px solid #e9ecef;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.01);
+}
+
+.gauge-circle-svg {
+  width: 140px;
+  height: 140px;
+  transform: rotate(-90deg);
+  margin-bottom: 12px;
+}
+
+.gauge-bg-track {
+  fill: none;
+  stroke: #edf2f7;
+  stroke-width: 12;
+}
+
+.gauge-progress-bar {
+  fill: none;
+  stroke: #81b29a;
+  stroke-width: 12;
+  stroke-linecap: round;
+  transition: stroke-dashoffset 0.5s ease-in-out;
+}
+
+.gauge-percentage-text {
+  font-size: 26px;
+  font-weight: 800;
+  color: #4a4e69;
+}
+
+.alerts-center-card {
+  background: #ffffff;
+  border-radius: 16px;
+  padding: 24px;
+  border: 1px solid #e9ecef;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.01);
+  display: flex;
+  flex-direction: column;
+}
+
+.alerts-header-title {
+  font-size: 15px;
+  font-weight: 700;
+  color: #4a4e69;
+  margin: 0 0 14px 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.alerts-scroll-container {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  overflow-y: auto;
+  max-height: 140px;
+  flex: 1;
+}
+
+.alert-message-strip {
+  padding: 12px 16px;
   border-radius: 8px;
-  cursor: pointer;
-  font-weight: 600;
   font-size: 13px;
-  transition: all 0.2s;
+  font-weight: 500;
+  line-height: 1.5;
+  border-left: 4px solid #ffdadf;
+  background-color: #fff5f5;
+  color: #d63031;
+  text-align: left;
 }
 
-.cal-arrow-btn:hover {
-  border-color: #81b29a;
-  color: #81b29a;
+.alert-message-strip.medium-severity {
+  border-left-color: #ffda79;
+  background-color: #fffdf2;
+  color: #cc8e35;
 }
 
+.alert-empty-state {
+  color: #8d99ae;
+  font-size: 13.5px;
+  font-style: italic;
+  margin: auto 0;
+  text-align: center;
+}
+
+.metrics-summary-row {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 16px;
+  margin-bottom: 28px;
+}
+
+.mini-stat-panel {
+  background: #ffffff;
+  border-radius: 12px;
+  padding: 16px 20px;
+  border: 1px solid #e9ecef;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.01);
+  text-align: left;
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.mini-stat-panel:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.04);
+}
+
+.mini-stat-label {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.7px;
+  display: flex;
+  align-items: center;
+}
+
+.mini-stat-value {
+  font-size: 18px;
+  font-weight: 700;
+  color: #4a4e69;
+}
+
+/* --- WELLNESS CALENDAR CELL LAYOUT --- */
 .calendar-card {
   background: #ffffff;
   border-radius: 16px;
   padding: 24px;
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.01);
+  border: 1px solid #e9ecef;
 }
 
 .calendar-days-header {
@@ -296,24 +419,26 @@
   font-size: 12px;
   font-weight: 600;
   color: #9a8c98;
+  text-align: left;
 }
 
 .mood-vector-wrapper {
   width: 100%;
-  height: 80%;
+  height: 75%;
   display: flex;
   align-items: center;
   justify-content: center;
 }
 
 .mood-svg-container {
-  width: 80%;
-  height: 80%;
+  height: 100%;
+  aspect-ratio: 1 / 1;
   border-radius: 50%;
-  padding: 4px;
+  padding: 6px;
   display: flex;
   align-items: center;
   justify-content: center;
+  box-sizing: border-box;
 }
 
 .bg-lvl-1 { background-color: #fde8e8; color: #e53e3e; }
@@ -322,12 +447,34 @@
 .bg-lvl-4 { background-color: #f0fdf4; color: #38a169; }
 .bg-lvl-5 { background-color: #e6f4ea; color: #81b29a; }
 
-/* --- ENTRY FORM --- */
+.cal-nav-buttons, .calendar-nav-buttons {
+  display: flex;
+  gap: 10px;
+}
+
+.cal-arrow-btn {
+  background: #ffffff;
+  border: 1px solid #dcdde1;
+  padding: 8px 16px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 13px;
+  transition: all 0.2s;
+}
+
+.cal-arrow-btn:hover {
+  border-color: #81b29a;
+  color: #81b29a;
+}
+
+/* --- HABIT ENTRY COMPONENT CARDS --- */
 .entry-form-card {
   background: #ffffff;
   border-radius: 16px;
   padding: 32px;
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.01);
+  border: 1px solid #e9ecef;
 }
 
 .entry-mood-flex-grid {
@@ -374,6 +521,7 @@
   padding: 20px;
   margin-bottom: 16px;
   transition: border-color 0.2s;
+  text-align: left;
 }
 
 .metrics-form-grid {
@@ -387,6 +535,7 @@
   display: flex;
   flex-direction: column;
   gap: 6px;
+  text-align: left;
 }
 
 .form-input-container label {
@@ -404,12 +553,29 @@
   background-color: #f8f9fa;
   color: #4a4e69;
   box-sizing: border-box;
+  outline: none;
 }
 
 .form-numerical-input:focus {
   border-color: #81b29a;
   background-color: #ffffff;
+}
+
+.form-date-input {
+  padding: 10px 14px;
+  border: 1px solid #dcdde1;
+  border-radius: 8px;
+  font-size: 14px;
+  color: #4a4e69;
+  background-color: #f8f9fa;
+  font-family: inherit;
   outline: none;
+  max-width: 200px;
+}
+
+.form-date-input:focus {
+  border-color: #81b29a;
+  background-color: #ffffff;
 }
 
 .form-notes-textarea {
@@ -432,7 +598,7 @@
   background-color: #ffffff;
 }
 
-/* --- OVERLAY MODAL STYLES --- */
+/* --- OVERLAY INTERACTIVE MODALS --- */
 .modal-backdrop-layer {
   position: fixed;
   top: 0;
@@ -466,7 +632,7 @@
   margin-bottom: 20px;
 }
 
-.modal-header-row h3 { margin: 0; font-size: 18px; font-weight: 700; }
+.modal-header-row h3 { margin: 0; font-size: 17px; font-weight: 700; }
 .close-modal-x { background: none; border: none; font-size: 22px; cursor: pointer; color: #9a8c98; }
 
 .modal-mood-banner {
@@ -476,16 +642,11 @@
   padding: 16px;
   border-radius: 12px;
   margin-bottom: 20px;
+  text-align: left;
 }
 
-.modal-mood-icon-fixed { width: 48px; height: 48px; }
-
-.modal-metrics-display-box {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  margin-bottom: 24px;
-}
+.modal-mood-icon-fixed { width: 48px; height: 48px; flex-shrink: 0; }
+.modal-metrics-display-box { display: flex; flex-direction: column; gap: 10px; margin-bottom: 24px; }
 
 .modal-metric-pill {
   background-color: #f8f9fa;
@@ -507,15 +668,14 @@
   color: #4a4e69;
   border-left: 4px solid #81b29a;
   margin-bottom: 24px;
+  text-align: left;
 }
 
-/* POLISHED MODERN ACTION BUTTON CONTAINER RULES */
 .modal-action-btn-primary {
-  flex: 1;
   padding: 12px 20px;
-  border: none; /* Completely removes default harsh black borders */
+  border: none;
   border-radius: 8px;
-  background-color: #81b29a; /* Sage Green theme standard */
+  background-color: #81b29a;
   color: #ffffff;
   font-weight: 600;
   font-size: 14px;
@@ -523,14 +683,11 @@
   transition: background-color 0.2s ease;
 }
 
-.modal-action-btn-primary:hover {
-  background-color: #6b9b84;
-}
+.modal-action-btn-primary:hover { background-color: #6b9b84; }
 
 .modal-action-btn-secondary {
-  flex: 1;
   padding: 12px 20px;
-  border: 1px solid #dcdde1; /* Soft slate replacement divider border line */
+  border: 1px solid #dcdde1;
   border-radius: 8px;
   background-color: #ffffff;
   color: #6c757d;
@@ -542,149 +699,7 @@
 
 .modal-action-btn-secondary:hover {
   background-color: #f8f9fa;
-  color: #4a4e69;
   border-color: #c8c9cc;
-}
-
-.form-date-input {
-  padding: 10px 14px;
-  border: 1px solid #dcdde1;
-  border-radius: 8px;
-  font-size: 14px;
-  color: #4a4e69;
-  background-color: #f8f9fa;
-  font-family: inherit;
-  outline: none;
-  max-width: 200px;
-}
-
-.form-date-input:focus {
-  border-color: #81b29a;
-  background-color: #ffffff;
-}
-
-/* --- MOOD HISTORY SHEET STYLING RULES --- */
-
-.history-list-wrapper {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-  margin-top: 20px;
-}
-
-.history-item-card {
-  background: #ffffff;
-  border-radius: 14px;
-  padding: 20px 24px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.01);
-  border: 1px solid #e9ecef;
-  transition: transform 0.2s, border-color 0.2s;
-}
-
-.history-item-card:hover {
-  transform: translateY(-2px);
-  border-color: #b2c9be;
-}
-
-.history-card-left-section {
-  display: flex;
-  align-items: center;
-  gap: 20px;
-}
-
-.history-mood-icon-frame {
-  width: 46px;
-  height: 46px;
-  flex-shrink: 0;
-}
-
-.history-metadata-box {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.history-date-header {
-  font-size: 16px;
-  font-weight: 700;
-  color: #4a4e69;
-  margin: 0;
-}
-
-.history-notes-preview {
-  font-size: 13px;
-  color: #8d99ae;
-  margin: 0;
-  max-width: 450px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.history-activity-pills-row {
-  display: flex;
-  gap: 6px;
-  flex-wrap: wrap;
-  margin-top: 4px;
-}
-
-.history-pill-tag {
-  font-size: 11px;
-  font-weight: 600;
-  padding: 3px 8px;
-  border-radius: 6px;
-  background-color: #f1f3f5;
-  color: #6c757d;
-}
-
-/* Specific color-coded left borders matching the activity types */
-.history-pill-tag.sleep { background-color: #f0eeff; color: #4F46E5; }
-.history-pill-tag.water { background-color: #e6f9fc; color: #06B6D4; }
-.history-pill-tag.exercise { background-color: #eafaf1; color: #10B981; }
-.history-pill-tag.study { background-color: #fff6e6; color: #f39c12; }
-
-.history-card-actions-cluster {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-.history-edit-btn {
-  background-color: #ffffff;
-  border: 1px solid #dcdde1;
-  color: #6c757d;
-  padding: 8px 14px;
-  border-radius: 6px;
-  font-size: 13px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: all 0.2s;
-}
-
-.history-edit-btn:hover {
-  border-color: #81b29a;
-  color: #81b29a;
-  background-color: #f2f7f5;
-}
-
-.history-delete-btn {
-  background-color: #ffffff;
-  border: 1px solid #ffdadf;
-  color: #d63031;
-  padding: 8px 14px;
-  border-radius: 6px;
-  font-size: 13px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: all 0.2s;
-}
-
-.history-delete-btn:hover {
-  background-color: #ffeef0;
-  border-color: #ffb3ba;
 }
 
 .action-button-compact {
@@ -694,23 +709,20 @@
   padding: 10px 18px;
   border: none;
   border-radius: 8px;
-  background-color: #81b29a; /* Cohesive Sage Green */
+  background-color: #81b29a;
   color: #ffffff;
   font-weight: 600;
   font-size: 14px;
   cursor: pointer;
   white-space: nowrap;
-  width: auto; /* Restricts width strictly to content size dimensions */
-  flex-grow: 0; /* Prevents button from expanding inside flex containers */
+  width: auto;
+  flex-grow: 0;
   transition: background-color 0.2s ease;
 }
 
-.action-button-compact:hover {
-  background-color: #6b9b84;
-}
+.action-button-compact:hover { background-color: #6b9b84; }
 
-/* --- MOOD HISTORY FILTERS TOOLBAR --- */
-
+/* --- CHRONOLOGICAL MOOD HISTORY SEARCH CONTROLS --- */
 .history-controls-bar {
   display: flex;
   gap: 16px;
@@ -754,7 +766,67 @@
   transition: all 0.2s ease;
 }
 
-.filter-select-dropdown:focus {
-  border-color: #81b29a;
-  background-color: #ffffff;
+.history-list-wrapper { display: flex; flex-direction: column; gap: 16px; margin-top: 20px; }
+
+.history-item-card {
+  background: #ffffff;
+  border-radius: 14px;
+  padding: 20px 24px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.01);
+  border: 1px solid #e9ecef;
+  transition: transform 0.2s, border-color 0.2s;
 }
+
+.history-item-card:hover { transform: translateY(-2px); border-color: #b2c9be; }
+.history-card-left-section { display: flex; align-items: center; gap: 20px; }
+.history-mood-icon-frame { width: 46px; height: 46px; flex-shrink: 0; }
+.history-metadata-box { display: flex; flex-direction: column; gap: 4px; text-align: left; }
+.history-date-header { font-size: 16px; font-weight: 700; color: #4a4e69; margin: 0; }
+.history-notes-preview { font-size: 13px; color: #8d99ae; margin: 0; max-width: 450px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.history-activity-pills-row { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 4px; }
+
+.history-pill-tag {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 3px 8px;
+  border-radius: 6px;
+  background-color: #f1f3f5;
+  color: #6c757d;
+}
+
+.history-pill-tag.sleep { background-color: #f0eeff; color: #4F46E5; }
+.history-pill-tag.water { background-color: #e6f9fc; color: #06B6D4; }
+.history-pill-tag.exercise { background-color: #eafaf1; color: #10B981; }
+.history-pill-tag.study { background-color: #fff6e6; color: #f39c12; }
+.history-card-actions-cluster { display: flex; align-items: center; gap: 10px; }
+
+.history-edit-btn {
+  background-color: #ffffff;
+  border: 1px solid #dcdde1;
+  color: #6c757d;
+  padding: 8px 14px;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.history-edit-btn:hover { border-color: #81b29a; color: #81b29a; background-color: #f2f7f5; }
+
+.history-delete-btn {
+  background-color: #ffffff;
+  border: 1px solid #ffdadf;
+  color: #d63031;
+  padding: 8px 14px;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.history-delete-btn:hover { background-color: #ffeef0; border-color: #ffb3ba; }
