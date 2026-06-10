@@ -102,7 +102,7 @@ const UserDashboard = () => {
   // Micro-habit task completion local checklist cache
   const [completedTasksCache, setCompletedTasksCache] = useState({});
 
-  // LIVE DATA REGISTERS: Notifications hook defaults to empty array
+  // LIVE DATA REGISTERS: Notifications hook defaults to safe empty array (No Mock Data)
   const [notifications, setNotifications] = useState([]);
   const [isProcessingAction, setIsProcessingAction] = useState(false);
 
@@ -335,29 +335,12 @@ const UserDashboard = () => {
     }
   };
 
-  const handleAvatarPhotoUpload = async (e) => {
-    if (!e.target.files || e.target.files.length === 0) return;
-    const file = e.target.files[0];
-    const fileExt = file.name.split('.').pop();
-    const storagePath = `${user.id}/avatar-${Date.now()}.${fileExt}`;
-
-    try {
-      const { error: uploadErr } = await supabase.storage.from('avatars').upload(storagePath, file, { upsert: true });
-      if (uploadErr) throw uploadErr;
-      const { data: pathResolver } = supabase.storage.from('avatars').getPublicUrl(storagePath);
-      const publicUrl = pathResolver.publicUrl;
-      await supabase.from('profile').update({ avatar_url: publicUrl }).eq('id', user.id);
-      setAvatarUrl(publicUrl);
-      alert('Profile photo asset uploaded securely.');
-    } catch (err) {
-      alert('Upload failed: ' + err.message);
-    }
-  };
-
+  // REAL PRODUCTION TRANSACTION: Persist dual-consent fields directly to schema records tables
   const handleResolveConsentTransaction = async (notificationId, requestId, statusInput) => {
     setIsProcessingAction(true);
     const booleanAgreementValue = statusInput === 'approved';
     try {
+      // 1. Update the actual access_requests row status to match the user consensus choice
       const { error: requestErr } = await supabase
         .from('access_requests')
         .update({ 
@@ -367,6 +350,7 @@ const UserDashboard = () => {
         .eq('id', requestId);
       if (requestErr) throw requestErr;
 
+      // 2. Mark the corresponding UI alert record as read/processed
       const { error: notificationErr } = await supabase
         .from('notifications')
         .update({ is_read: true })
@@ -374,7 +358,7 @@ const UserDashboard = () => {
       if (notificationErr) throw notificationErr;
 
       alert(`Consent submitted successfully. Monitoring access token set to: ${statusInput.toUpperCase()}`);
-      await fetchUserNotificationsSystem(); 
+      await fetchUserNotificationsSystem(); // Force pull absolute single-source-of-truth refresh from DB
     } catch (err) {
       alert('Database update transaction dropped: ' + err.message);
     } finally {
@@ -721,6 +705,7 @@ const UserDashboard = () => {
             <NavIcons.Analytics />{!isSidebarCollapsed && <span>Trend Analytics</span>}
           </li>
           
+          {/* NOTIFICATION SENSOR NODE: Linked directly to live unread state rows count */}
           <li 
             className={`sidebar-link-item ${currentView === 'notifications' ? 'active' : ''}`} 
             onClick={() => setCurrentView('notifications')}
@@ -749,7 +734,7 @@ const UserDashboard = () => {
           <div className="profile-menu-container">
             <button className="avatar-interactive-trigger" onClick={() => setIsDropdownOpen(!isDropdownOpen)}>
               {avatarUrl ? (
-                <img src={avatarUrl} alt="User profile" className="avatar-image-render" />
+                <img src={avatarUrl} alt="User profile photo link" className="avatar-image-render" />
               ) : (
                 <span style={{ fontSize: '16px', fontWeight: 'bold', color: '#6b9b84' }}>{(profileName || 'W')[0].toUpperCase()}</span>
               )}
@@ -766,10 +751,10 @@ const UserDashboard = () => {
           </div>
         </nav>
 
-        {/* WORKSPACE VIEW SWITCHBOARD */}
+        {/* MAIN DISPLAY VIEW SWITCHER PANELS */}
         <main className="workspace-view">
           
-          {/* VIEW BRANCH A: WELLNESS CALENDAR DASHBOARD */}
+          {/* VIEW TAB A: MOOD LOGGING GRID CALENDAR */}
           {currentView === 'calendar' && (
             <>
               <div className="dashboard-hero-grid">
@@ -883,7 +868,7 @@ const UserDashboard = () => {
             </>
           )}
 
-          {/* VIEW TAB B: TREND ANALYTICS */}
+          {/* VIEW TAB B: LONGITUDINAL RECHARTS TREND ANALYTICS */}
           {currentView === 'analytics' && (
             <div>
               <div className="workspace-header">
@@ -905,7 +890,6 @@ const UserDashboard = () => {
                 <div className="analytics-chart-card">
                   <div className="analytics-chart-header-cluster">
                     <div>
-                      {/* FIXED TYPO: Inserted missing syntax colon directly into the fontWeight primitive object property */}
                       <h4 style={{ margin: 0, fontSize: '15px', fontWeight: 700, color: '#4a4e69' }}>How Your Habits Connect with Your Well-being</h4>
                       <span style={{ display: 'block', fontSize: '11px', color: '#8d99ae', fontWeight: 500, fontStyle: 'italic', marginTop: '2px' }}>Relational Habit-to-Mood Cross Matrix (Rules SL3 & HY2 Evaluation)</span>
                     </div>
@@ -1057,7 +1041,7 @@ const UserDashboard = () => {
             </div>
           )}
 
-          {/* VIEW TAB C: MOOD HISTORY CHRONOLOGICAL LIST LEDGER */}
+          {/* VIEW TAB C: CHRONOLOGICAL HISTORICAL MOOD LOGS LEDGER */}
           {currentView === 'history' && (
             <div>
               <div className="workspace-header">
@@ -1141,11 +1125,13 @@ const UserDashboard = () => {
             </div>
           )}
 
-          {/* NEW ENTRY FORM */}
+          {/* VIEW TAB D: DAILY RECORD LOG INPUT INTERFACE FORM */}
           {currentView === 'new-entry' && (
             <div className="entry-form-card">
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-                <h3>{isEditMode ? 'Edit Parameters Log Row' : 'Record Daily Parameters'}</h3>
+                <h3 style={{ margin: 0, fontSize: '20px' }}>
+                  {isEditMode ? 'Edit Parameters Log Row' : 'Record Daily Parameters'}
+                </h3>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                   <label style={{ fontSize: '13px', fontWeight: '600', color: '#9a8c98' }}>Logging Date:</label>
                   <input type="date" className="form-date-input" value={logTargetDate} onChange={e => setLogTargetDate(e.target.value)} disabled={isEditMode} />
@@ -1234,7 +1220,7 @@ const UserDashboard = () => {
 
                 </div>
 
-                <label style={{ block: 'block', fontSize: '13px', fontWeight: '600', marginBottom: '6px' }}>Journaling Reflection Notes</label>
+                <label style={{ display: 'block', fontSize: '13px', fontWeight: '600', marginBottom: '6px' }}>Journaling Reflection Notes</label>
                 <textarea className="form-notes-textarea" placeholder="Describe anything that impacted your wellness today..." value={journalNotes} onChange={e => setJournalNotes(e.target.value)} />
 
                 <div style={{ display: 'flex', gap: '12px' }}>
@@ -1249,7 +1235,7 @@ const UserDashboard = () => {
             </div>
           )}
 
-          {/* NOTIFICATION CENTER */}
+          {/* NEW LIVE VIEW TAB E: PRODUCTION NOTIFICATION HANDSHAKE HUB */}
           {currentView === 'notifications' && (
             <div>
               <div className="workspace-header">
