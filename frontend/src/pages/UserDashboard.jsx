@@ -6,14 +6,29 @@ import MindTrackLogo from '../components/MindTrackLogo';
 import { MoodVectors, NavIcons, DashboardIcons } from '../components/MoodVectors';
 import './UserDashboard.css';
 
+// Import Recharts charting engines for data visualization
+import { 
+  ComposedChart, Line, Bar, XAxis, YAxis, CartesianGrid, Tooltip, 
+  Legend, ResponsiveContainer, PieChart, Pie, Cell, AreaChart, Area,
+  ReferenceLine, ReferenceArea
+} from 'recharts';
+
 const UserDashboard = () => {
   const { user } = useAuth();
   
-  // Navigation layout switches: 'calendar' | 'new-entry' | 'history'
+  // Navigation layout states: 'calendar' | 'new-entry' | 'history' | 'analytics'
   const [currentView, setCurrentView] = useState('calendar'); 
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const [currentDate, setCurrentDate] = useState(new Date());
+
+  // Analytics window toggle selector state: 7 | 30
+  const [analyticsDaysRange, setAnalyticsDaysRange] = useState(7);
+
+  // Collapsible layperson guide visibility control hooks
+  const [showHelpA, setShowHelpA] = useState(false);
+  const [showHelpB, setShowHelpB] = useState(false);
+  const [showHelpC, setShowHelpC] = useState(false);
 
   // Profile data parameters
   const [profileName, setProfileName] = useState('Wellness Member');
@@ -63,11 +78,15 @@ const UserDashboard = () => {
     5: { name: 'Very Happy', class: 'bg-lvl-5', color: '#81b29a' },
   };
 
-  // Calendar configuration parameters bounded safely to root instance scope
+  // --- CRITICAL SCOPE LEVEL DEFINITIONS ---
+  // Constants declared globally at root body function level to ensure absolute availability
   const year = currentDate.getFullYear();
   const month = currentDate.getMonth();
   const totalDays = new Date(year, month + 1, 0).getDate();
   const weekOffsetIndex = new Date(year, month, 1).getDay();
+
+  const circleRadius = 55;
+  const circleCircumference = 2 * Math.PI * circleRadius;
 
   const dayGridCells = [];
   for (let i = 0; i < weekOffsetIndex; i++) dayGridCells.push({ type: 'empty' });
@@ -254,11 +273,10 @@ const UserDashboard = () => {
     }
   };
 
-  // Core multi-table save routine with insight parsing blocks
   const handleEntryFormSubmit = async (e) => {
     e.preventDefault();
     if (!selectedMood) {
-      alert('Please isolate a mood node.');
+      alert('Please choose your mood.');
       return;
     }
     setIsFormSubmitting(true);
@@ -308,7 +326,6 @@ const UserDashboard = () => {
       const studyMins = computeTimeDelta(studyStart, studyEnd, 'minutes');
       await handleSubTableSync(trackStudy, 'Study', 'study_activity', { start_time: studyStart, end_time: studyEnd, duration_minutes: studyMins }, existingActs?.study);
 
-      // --- COMMIT CALCULATIONS TO INSIGHT TABLES ---
       const { data: recentHistoricalLogs } = await supabase
         .from('mood_entry')
         .select(`
@@ -404,7 +421,7 @@ const UserDashboard = () => {
         }
       }
 
-      alert(isEditMode ? 'Day log entry updated successfully!' : 'Daily parameters logged and processed through the insights engine successfully!');
+      alert(isEditMode ? 'Log entry updated successfully!' : 'Daily parameters logged and processed successfully!');
       setIsEditMode(false); setEditEntryId(null); setSelectedMood(null); setJournalNotes('');
       setTrackSleep(false); setTrackWater(false); setTrackExercise(false); setTrackStudy(false);
       setSleepStart(''); setSleepEnd(''); setWaterGlasses(''); setExerciseDuration(''); setStudyStart(''); setStudyEnd('');
@@ -479,22 +496,156 @@ const UserDashboard = () => {
     }
     const trailingFiveLogs = allLogsChronological.slice(0, 5);
     if (trailingFiveLogs.length >= 5 && trailingFiveLogs.every(l => l.subActivities?.sleep && parseFloat(l.subActivities.sleep.duration_hours) < 5)) {
-      triggeredAdviceAlerts.push({ severity: 'medium', message: "⚠️ Critical Sleep Deficit: Sleep duration has been under 5 hours for 5 consecutive records. Prioritize recovery tonight." });
+      triggeredAdviceAlerts.push({ severity: 'medium', message: "Critical Sleep Deficit: Sleep duration has been under 5 hours for 5 consecutive records. Prioritize recovery tonight." });
     }
     const trailingThreeLogs = allLogsChronological.slice(0, 3);
     if (trailingThreeLogs.length >= 3 && trailingThreeLogs.every(l => l.subActivities?.water && parseInt(l.subActivities.water.glasses_count) < 6)) {
-      triggeredAdviceAlerts.push({ severity: 'medium', message: "💧 Dehydration Warning: Fluid intake has dropped below 6 glasses for 3 consecutive days. Drink some water now." });
+      triggeredAdviceAlerts.push({ severity: 'medium', message: "Dehydration Warning: Fluid intake has dropped below 6 glasses for 3 consecutive days. Drink some water now." });
     }
   }
 
-  const circleRadius = 55;
-  const circleCircumference = 2 * Math.PI * circleRadius;
+  // Time conversion helpers
+  const formatDecimalBedtimeToHuman = (decimalHours) => {
+    if (!decimalHours) return '';
+    let hours = Math.floor(decimalHours);
+    let minutes = Math.round((decimalHours - hours) * 60);
+    let isNextDay = false;
+    if (hours >= 24) {
+      hours -= 24;
+      isNextDay = true;
+    }
+    const ampm = hours >= 12 ? 'PM' : 'AM';
+    let displayHours = hours % 12;
+    if (displayHours === 0) displayHours = 12;
+    return `${displayHours}:${String(minutes).padStart(2, '0')} ${ampm}${isNextDay ? ' (Next Day)' : ''}`;
+  };
+
+  // --- RECHARTS DYNAMIC TOOLTIPS COMPONENTS ---
+  const CustomCorrelationTooltip = ({ active, payload }) => {
+    if (active && payload && payload.length) {
+      const data = payload[0].payload;
+      return (
+        <div className="custom-chart-tooltip-box">
+          <p className="tooltip-date-header">{data.dateStr}</p>
+          <p className="tooltip-data-row" style={{ color: '#81b29a' }}>
+            Mood: {moodMetaConfig[data['Mood Index']]?.name || 'Unknown'} ({data['Mood Index']}/5)
+          </p>
+          <p className="tooltip-data-row" style={{ color: '#778da9' }}>
+            Sleep Duration: {data['Sleep Duration (hrs)']} hrs
+          </p>
+          <p className="tooltip-data-row" style={{ color: '#629098' }}>
+            Hydration: {data['Hydration (Glasses)']} Glasses
+          </p>
+        </div>
+      );
+    }
+    return null;
+  };
+
+  const CustomCircadianTooltip = ({ active, payload }) => {
+    if (active && payload && payload.length) {
+      const data = payload[0].payload;
+      return (
+        <div className="custom-chart-tooltip-box">
+          <p className="tooltip-date-header">{data.dateStr}</p>
+          <p className="tooltip-data-row" style={{ color: '#b78773' }}>
+            Bedtime Target: {formatDecimalBedtimeToHuman(data['Bedtime Hour Index'])}
+          </p>
+        </div>
+      );
+    }
+    return null;
+  };
+
+  const targetAnalyticsLogs = allLogsChronological.slice(0, analyticsDaysRange).reverse();
+
+  const correlationChartData = targetAnalyticsLogs.map(log => {
+    const dObj = new Date(log.created_at);
+    return {
+      dateStr: dObj.toLocaleDateString('default', { month: 'short', day: 'numeric' }),
+      'Mood Index': log.mood_id,
+      'Sleep Duration (hrs)': log.subActivities?.sleep ? parseFloat(log.subActivities.sleep.duration_hours) : 0,
+      'Hydration (Glasses)': log.subActivities?.water ? parseInt(log.subActivities.water.glasses_count) : 0
+    };
+  });
+
+  const emotionalDistributionCounts = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 };
+  targetAnalyticsLogs.forEach(log => {
+    if (emotionalDistributionCounts[log.mood_id] !== undefined) {
+      emotionalDistributionCounts[log.mood_id]++;
+    }
+  });
+
+  const pieChartDataData = Object.keys(emotionalDistributionCounts).map(idKey => ({
+    name: moodMetaConfig[idKey].name,
+    value: emotionalDistributionCounts[idKey],
+    color: moodMetaConfig[idKey].color
+  })).filter(slice => slice.value > 0);
+
+  const bedtimeTimelineData = targetAnalyticsLogs.map(log => {
+    const dObj = new Date(log.created_at);
+    let decimalBedtimeHours = 0;
+    if (log.subActivities?.sleep?.start_time) {
+      const [h, m] = log.subActivities.sleep.start_time.split(':').map(Number);
+      decimalBedtimeHours = h + (m / 60);
+      if (h < 6) decimalBedtimeHours += 24; 
+    }
+    return {
+      dateStr: dObj.toLocaleDateString('default', { month: 'short', day: 'numeric' }),
+      'Bedtime Hour Index': parseFloat(decimalBedtimeHours.toFixed(2)),
+      rawTimeStr: log.subActivities?.sleep?.start_time || 'No log'
+    };
+  }).filter(item => item['Bedtime Hour Index'] > 0);
+
+  // Evaluate Long-Term Analytics Engine Rules
+  const longitudinalInsightRecommendations = [];
+
+  if (targetAnalyticsLogs.length >= 3) {
+    const validBedtimes = bedtimeTimelineData.map(d => d['Bedtime Hour Index']);
+    if (validBedtimes.length >= 3) {
+      const minSleepOnset = Math.min(...validBedtimes);
+      const maxSleepOnset = Math.max(...validBedtimes);
+      if (maxSleepOnset - minSleepOnset > 3) {
+        longitudinalInsightRecommendations.push({
+          isWarning: true,
+          message: "Circadian Rhythm Instability Detected (Rule SL2): Your sleep onset boundary has drifted by more than 3 hours across this window. Erratic bedtimes penalize overall emotional recovery vectors."
+        });
+      }
+    }
+
+    const healthySleepDays = targetAnalyticsLogs.filter(l => l.subActivities?.sleep && parseFloat(l.subActivities.sleep.duration_hours) >= 7);
+    const lowSleepDays = targetAnalyticsLogs.filter(l => !l.subActivities?.sleep || parseFloat(l.subActivities.sleep.duration_hours) < 7);
+    
+    if (healthySleepDays.length >= 2 && lowSleepDays.length >= 2) {
+      const avgMoodHealthy = healthySleepDays.reduce((acc, current) => acc + current.mood_id, 0) / healthySleepDays.length;
+      const avgMoodLow = lowSleepDays.reduce((acc, current) => acc + current.mood_id, 0) / lowSleepDays.length;
+      if (avgMoodHealthy > avgMoodLow) {
+        longitudinalInsightRecommendations.push({
+          isWarning: false,
+          message: `Sustained Rest Correlation Verified (Rule SL3): Your daily mood averages significantly higher (${avgMoodHealthy.toFixed(1)} vs ${avgMoodLow.toFixed(1)}) on blocks where sleep metrics hit 7+ hours.`
+        });
+      }
+    }
+
+    const optimalHydrationDays = targetAnalyticsLogs.filter(l => l.subActivities?.water && parseInt(l.subActivities.water.glasses_count) >= 6);
+    if (optimalHydrationDays.length >= 3) {
+      const highHydrationMoodAverage = optimalHydrationDays.reduce((acc, current) => acc + current.mood_id, 0) / optimalHydrationDays.length;
+      if (highHydrationMoodAverage >= 3.5) {
+        longitudinalInsightRecommendations.push({
+          isWarning: false,
+          message: "Positive Fluid Velocity (Rule HY2): Maintaining daily hydration above 6 glasses correlates directly with sustained neutral-to-happy tracking weeks."
+        });
+      }
+    }
+  }
+
+  // Arc math computed universally based on root body function states variables definitions
   const arcStrokeOffset = circleCircumference - (computedWellnessScore / 100) * circleCircumference;
 
   return (
     <div className="dashboard-layout">
       
-      {/* SIDEBAR NAVIGATION */}
+      {/* SIDEBAR NAVIGATION CONTROL ELEMENT */}
       <aside className={`sidebar-nav ${isSidebarCollapsed ? 'collapsed' : ''}`}>
         <div className="sidebar-brand-box"><MindTrackLogo showText={!isSidebarCollapsed} /></div>
         <ul className="sidebar-menu-links">
@@ -507,7 +658,7 @@ const UserDashboard = () => {
           <li className={`sidebar-link-item ${currentView === 'history' ? 'active' : ''}`} onClick={() => setCurrentView('history')}>
             <NavIcons.History />{!isSidebarCollapsed && <span>Mood History</span>}
           </li>
-          <li className="sidebar-link-item" onClick={() => alert('Analytics tracking components coming soon.')}>
+          <li className={`sidebar-link-item ${currentView === 'analytics' ? 'active' : ''}`} onClick={() => setCurrentView('analytics')}>
             <NavIcons.Analytics />{!isSidebarCollapsed && <span>Trend Analytics</span>}
           </li>
         </ul>
@@ -515,7 +666,7 @@ const UserDashboard = () => {
 
       <div className="dashboard-main-content">
         
-        {/* NAVBAR */}
+        {/* TOP NAVBAR ROW CONTAINER */}
         <nav className="top-navbar">
           <div className="nav-left-cluster">
             <button className="sidebar-toggle-btn" onClick={() => setIsSidebarCollapsed(!isSidebarCollapsed)}><NavIcons.MenuToggle /></button>
@@ -542,7 +693,7 @@ const UserDashboard = () => {
           </div>
         </nav>
 
-        {/* WORKSPACE VIEWS CONTAINER */}
+        {/* MAIN MODULE CANVAS WINDOW CONTROLLER SWITCHBOARD */}
         <main className="workspace-view">
           
           {/* VIEW BRANCH A: FULL VECTOR-BASED OPERATIONAL DASHBOARD */}
@@ -550,7 +701,7 @@ const UserDashboard = () => {
             <>
               <div className="dashboard-hero-grid">
                 
-                {/* WIDGET 1: WELLNESS COMPOSITE PROGRESS CIRCLE */}
+                {/* WIDGET 1: PERFORMANCE RADIAL COEFFICIENTS RING PROGRESS */}
                 <div className="wellness-gauge-card">
                   <span className="mini-stat-label" style={{ marginBottom: '10px' }}>Wellness Score</span>
                   <div style={{ position: 'relative', width: '140px', height: '140px' }}>
@@ -570,7 +721,7 @@ const UserDashboard = () => {
                   <p style={{ fontSize: '12px', color: '#8d99ae', margin: '8px 0 0 0', lineHeight: 1.4 }}>Rolling 7-day unified status weight index calculation</p>
                 </div>
 
-                {/* STEP 2 FIXED - WIDGET 2: VECTOR EMBEDDED INSIGHTS PANEL */}
+                {/* WIDGET 2: VECTOR EMBEDDED REALTIME AUTOMATED ADVICE ALERTS */}
                 <div className="alerts-center-card">
                   <h4 className="alerts-header-title" style={{ color: '#4a4e69', display: 'flex', alignItems: 'center', gap: '8px' }}>
                     <DashboardIcons.Insights /> Automated Insights Engine
@@ -579,7 +730,9 @@ const UserDashboard = () => {
                     {allLogsChronological.length === 0 ? (
                       <span className="alert-empty-state">Log a few parameters rows to activate real-time tracking scripts.</span>
                     ) : triggeredAdviceAlerts.length === 0 ? (
-                      <span className="alert-empty-state" style={{ color: '#81b29a' }}>🌿 Relational integrity verified. All tracked habits look consistent!</span>
+                      <div className="alert-message-strip positive-state" style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                        <DashboardIcons.SuccessCheck /> Good job! Your tracked lifestyle habits and emotional stability indexes have been consistent for the past 7 days.
+                      </div>
                     ) : (
                       triggeredAdviceAlerts.map((alert, idx) => (
                         <div key={idx} className={`alert-message-strip ${alert.severity === 'medium' ? 'medium-severity' : ''}`}>
@@ -592,7 +745,7 @@ const UserDashboard = () => {
 
               </div>
 
-              {/* STEP 2 FIXED - WIDGET 3: SAGE BORDERED HABIT HIGHLIGHT PANELS */}
+              {/* WIDGET 3: SAGE BORDERED HABIT HIGHLIGHT MINIPANELS */}
               <div className="metrics-summary-row">
                 <div className="mini-stat-panel" style={{ borderTop: '4px solid #778da9' }}>
                   <span className="mini-stat-label" style={{ display: 'flex', alignItems: 'center', color: '#778da9' }}>
@@ -664,6 +817,187 @@ const UserDashboard = () => {
             </>
           )}
 
+          {/* DEDICATED VIEW SWITCHING: USER-FRIENDLY RECHARTS LONGITUDINAL TREND ANALYTICS */}
+          {currentView === 'analytics' && (
+            <div>
+              <div className="workspace-header">
+                <div>
+                  <h2 style={{ marginBottom: '4px' }}>Longitudinal Trend Analytics</h2>
+                  <p style={{ color: '#8d99ae', margin: 0, fontSize: '14px' }}>Analyze deep behavioral trends, habit correlations, and circadian rhythms over time.</p>
+                </div>
+              </div>
+
+              <div className="analytics-window-toolbar">
+                <span style={{ fontSize: '14px', fontWeight: '600', color: '#4a4e69' }}>Select Analytics Filter Bounds:</span>
+                <div className="calendar-nav-buttons">
+                  <button className="cal-arrow-btn" style={{ borderColor: analyticsDaysRange === 7 ? '#81b29a' : '#dcdde1', backgroundColor: analyticsDaysRange === 7 ? '#f2f7f5' : '#ffffff', color: analyticsDaysRange === 7 ? '#81b29a' : '#6c757d' }} onClick={() => setAnalyticsDaysRange(7)}>Trailing 7 Logs</button>
+                  <button className="cal-arrow-btn" style={{ borderColor: analyticsDaysRange === 30 ? '#81b29a' : '#dcdde1', backgroundColor: analyticsDaysRange === 30 ? '#f2f7f5' : '#ffffff', color: analyticsDaysRange === 30 ? '#81b29a' : '#6c757d' }} onClick={() => setAnalyticsDaysRange(30)}>Trailing 30 Logs</button>
+                </div>
+              </div>
+
+              {allLogsChronological.length === 0 ? (
+                <div style={{ textAlign: 'center', background: '#ffffff', padding: '40px', borderRadius: '16px', border: '1px solid #e9ecef', color: '#8d99ae' }}>
+                  <p style={{ margin: 0 }}>Insufficient parameter rows captured. Complete regular daily records logging entries to generate trends graphs.</p>
+                </div>
+              ) : (
+                <>
+                  {/* DATA VISUALIZATION CANVAS ROW 1 */}
+                  <div className="analytics-charts-matrix-grid">
+                    
+                    {/* CHART A: CONVERSATIONAL HABIT RELATION GRAPH */}
+                    <div className="analytics-chart-card">
+                      <div className="analytics-chart-header-cluster">
+                        <div>
+                          <h4 style={{ margin: 0, fontSize: '15px', fontWeight: 700, color: '#4a4e69' }}>How Your Habits Connect with Your Well-being</h4>
+                          <span style={{ display: 'block', fontSize: '11px', color: '#8d99ae', fontWeight: 500, fontStyle: 'italic', marginTop: '2px' }}>Relational Habit-to-Mood Cross Matrix (Rules SL3 & HY2 Evaluation)</span>
+                        </div>
+                        <button className={`chart-info-trigger-btn ${showHelpA ? 'active-help' : ''}`} onClick={() => setShowHelpA(!showHelpA)}>
+                          <DashboardIcons.Help /> {showHelpA ? 'Hide Guide' : 'Explain Chart'}
+                        </button>
+                      </div>
+
+                      {showHelpA && (
+                        <div className="chart-explanation-box">
+                          <p><strong>Overview:</strong> This graph combines your daily values to see if your hydration volume or rest patterns correspond to higher emotional scores. Look for spots where your peaks align!</p>
+                          <span>Backend Evaluation Engine: Validates Sleep Correlation (Rule SL3) and Fluid Intake Efficiency (Rule HY2).</span>
+                        </div>
+                      )}
+
+                      <div style={{ width: '100%', height: 260 }}>
+                        <ResponsiveContainer>
+                          <ComposedChart data={correlationChartData} margin={{ top: 10, right: -5, left: -20, bottom: 0 }}>
+                            <CartesianGrid strokeDasharray="3 3" stroke="#f1f3f5" strokeOpacity={0.4} />
+                            <XAxis dataKey="dateStr" tick={{ fontSize: 11, fill: '#9a8c98' }} axisLine={false} tickLine={false} />
+                            <YAxis yAxisId="left" domain={[1, 5]} tickCount={5} tick={{ fontSize: 11, fill: '#4a4e69' }} axisLine={false} tickLine={false} />
+                            <YAxis yAxisId="right" orientation="right" domain={[0, 'auto']} tick={{ fontSize: 11, fill: '#778da9' }} axisLine={false} tickLine={false} />
+                            
+                            <Tooltip content={<CustomCorrelationTooltip />} />
+                            <Legend wrapperStyle={{ fontSize: 11, paddingTop: 10 }} />
+                            
+                            <ReferenceArea y1={7} y2={9} yAxisId="right" fill="#778da9" fillOpacity={0.05} />
+                            
+                            <Bar yAxisId="right" dataKey="Hydration (Glasses)" name="Water Intake" fill="#629098" opacity={0.25} barSize={20} radius={[4, 4, 0, 0]} />
+                            <Line yAxisId="left" type="monotone" dataKey="Mood Index" name="Your Tracked Mood" stroke="#81b29a" strokeWidth={3} dot={{ r: 4, strokeWidth: 1, fill: '#ffffff' }} activeDot={{ r: 6 }} />
+                            <Line yAxisId="right" type="monotone" dataKey="Sleep Duration (hrs)" name="Daily Rest Duration" stroke="#778da9" strokeWidth={2} strokeDasharray="4 4" dot={false} />
+                          </ComposedChart>
+                        </ResponsiveContainer>
+                      </div>
+                    </div>
+
+                    {/* CHART B: PIE BASE DISTRIBUTION DENSITY PIE */}
+                    <div className="analytics-chart-card">
+                      <div className="analytics-chart-header-cluster">
+                        <div>
+                          <h4 style={{ margin: 0, fontSize: '15px', fontWeight: 700, color: '#4a4e69' }}>Your General Emotional Density Breakdown</h4>
+                          <span style={{ display: 'block', fontSize: '11px', color: '#8d99ae', fontWeight: 500, fontStyle: 'italic', marginTop: '2px' }}>Categorical Frequency Distribution Scale</span>
+                        </div>
+                        <button className={`chart-info-trigger-btn ${showHelpB ? 'active-help' : ''}`} onClick={() => setShowHelpB(!showHelpB)}>
+                          <DashboardIcons.Help /> {showHelpB ? 'Hide Guide' : 'Explain Chart'}
+                        </button>
+                      </div>
+
+                      {showHelpB && (
+                        <div className="chart-explanation-box">
+                          <p><strong>Overview:</strong> This breaks down your recorded moods as pure percentages of your total logs over this period, giving you an immediate view of your emotional baseline.</p>
+                          <span>Backend Evaluation Engine: Processes flat totals to evaluate percentage density thresholds.</span>
+                        </div>
+                      )}
+
+                      <div style={{ width: '100%', height: 210, position: 'relative' }}>
+                        <ResponsiveContainer>
+                          <PieChart>
+                            <Pie data={pieChartDataData} cx="50%" cy="50%" innerRadius={55} outerRadius={80} paddingAngle={4} dataKey="value">
+                              {pieChartDataData.map((entry, index) => (
+                                <Cell key={`cell-${index}`} fill={entry.color} />
+                              ))}
+                            </Pie>
+                            <Tooltip formatter={(value) => [`${value} logs recorded`]} />
+                          </PieChart>
+                        </ResponsiveContainer>
+                        {pieChartDataData.length === 0 && (
+                          <div style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, color: '#8d99ae' }}>No elements parsed</div>
+                        )}
+                      </div>
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px 12px', justifyContent: 'center', marginTop: '10px' }}>
+                        {pieChartDataData.map((item, idx) => (
+                          <div key={idx} style={{ display: 'flex', alignItems: 'center', gap: '5px', fontSize: '11px', fontWeight: 600, color: '#4a4e69' }}>
+                            <span style={{ width: '10px', height: '10px', borderRadius: '50%', backgroundColor: item.color }} />
+                            {item.name}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* DATA VISUALIZATION CANVAS ROW 2 */}
+                  <div className="analytics-charts-matrix-grid">
+                    
+                    {/* CHART C: SLEEP TIMELINE VARIANCE MAP CONTAINER */}
+                    <div className="analytics-chart-card">
+                      <div className="analytics-chart-header-cluster">
+                        <div>
+                          <h4 style={{ margin: 0, fontSize: '15px', fontWeight: 700, color: '#4a4e69' }}>Your Bedtime Schedule Consistency</h4>
+                          <span style={{ display: 'block', fontSize: '11px', color: '#8d99ae', fontWeight: 500, fontStyle: 'italic', marginTop: '2px' }}>Circadian Schedule Variance Timeline (Rule SL2 Evaluation)</span>
+                        </div>
+                        <button className={`chart-info-trigger-btn ${showHelpC ? 'active-help' : ''}`} onClick={() => setShowHelpC(!showHelpC)}>
+                          <DashboardIcons.Help /> {showHelpC ? 'Hide Guide' : 'Explain Chart'}
+                        </button>
+                      </div>
+
+                      {showHelpC && (
+                        <div className="chart-explanation-box">
+                          <p><strong>Overview:</strong> This chart maps your sleep onset times. Flat paths mean healthy, consistent sleep habits, while sharp zigzag spikes flag irregular schedules that impact recovery rhythms.</p>
+                          <span>Backend Evaluation Engine: Tracks timeline variance triggers to monitor Circadian Shifts (Rule SL2).</span>
+                        </div>
+                      )}
+
+                      <div style={{ width: '100%', height: 220 }}>
+                        {bedtimeTimelineData.length === 0 ? (
+                          <p style={{ fontSize: 13, color: '#8d99ae', padding: '40px', textAlign: 'center' }}>No sleep parameters logs recorded inside this assessment toggle window bounds.</p>
+                        ) : (
+                          <ResponsiveContainer>
+                            <AreaChart data={bedtimeTimelineData} margin={{ top: 10, right: 10, left: -25, bottom: 0 }}>
+                              <CartesianGrid strokeDasharray="3 3" stroke="#f1f3f5" strokeOpacity={0.4} />
+                              <XAxis dataKey="dateStr" tick={{ fontSize: 11, fill: '#9a8c98' }} axisLine={false} tickLine={false} />
+                              <YAxis domain={[20, 29]} tickCount={10} tickFormatter={(v) => `${v >= 24 ? v - 24 : v}:00`} tick={{ fontSize: 11, fill: '#4a4e69' }} axisLine={false} tickLine={false} />
+                              
+                              <Tooltip content={<CustomCircadianTooltip />} />
+                              <ReferenceLine y={23} stroke="#b78773" strokeDasharray="3 3" opacity={0.6} label={{ value: 'Ideal Schedule Target', fill: '#b78773', fontSize: 10, position: 'insideBottomLeft' }} />
+                              
+                              <Area type="monotone" dataKey="Bedtime Hour Index" stroke="#b78773" fill="#fdf8f6" strokeWidth={2.5} dot={{ r: 3.5, strokeWidth: 1, fill: '#ffffff' }} />
+                            </AreaChart>
+                          </ResponsiveContainer>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* LONG-TERM RULES ADVICE CENTER FEEDBACK */}
+                    <div className="analytics-recommendations-deck">
+                      <h4 className="analytics-chart-title" style={{ margin: '0 0 16px 0', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <DashboardIcons.Insights /> Longitudinal Insights
+                      </h4>
+                      <div style={{ flex: 1, overflowY: 'auto', maxHeight: '220px' }}>
+                        {longitudinalInsightRecommendations.length === 0 ? (
+                          <div style={{ height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', textAlign: 'center', color: '#81b29a', fontSize: '13px', padding: '20px', gap: '10px' }}>
+                            <DashboardIcons.SuccessCheck />
+                            <span style={{ fontStyle: 'italic', fontWeight: 500 }}>All verified lifestyle parameters and circadian regularity balances look healthy across this snapshot window.</span>
+                          </div>
+                        ) : (
+                          longitudinalInsightRecommendations.map((insight, idx) => (
+                            <div key={idx} className={`recommendation-insight-box ${insight.isWarning ? 'warning-state' : ''}`}>
+                              {insight.message}
+                            </div>
+                          ))
+                        )}
+                      </div>
+                    </div>
+
+                  </div>
+                </>
+              )}
+            </div>
+          )}
+
           {/* VIEW BRANCH B: MOOD HISTORY CHRONOLOGICAL LIST LEDGER */}
           {currentView === 'history' && (
             <div>
@@ -696,7 +1030,7 @@ const UserDashboard = () => {
 
               <div className="history-list-wrapper">
                 {filteredHistoryLogs.length === 0 ? (
-                  <div style={{ textProject: 'center', background: '#ffffff', padding: '40px', borderRadius: '16px', border: '1px solid #e9ecef' }}>
+                  <div style={{ textAlign: 'center', background: '#ffffff', padding: '40px', borderRadius: '16px', border: '1px solid #e9ecef' }}>
                     <p style={{ color: '#8d99ae', margin: '0 0 16px 0' }}>No matching historical mood records found.</p>
                     {(searchQuery || moodFilter !== 'all') && (
                       <button onClick={() => { setSearchQuery(''); setMoodFilter('all'); }} className="history-edit-btn">Clear Active Filters</button>
@@ -845,7 +1179,7 @@ const UserDashboard = () => {
                 </div>
 
                 <label style={{ display: 'block', fontSize: '13px', fontWeight: '600', marginBottom: '6px' }}>Journaling Reflection Notes</label>
-                <textarea className="form-notes-textarea" placeholder="Describe any variables that impacted your wellness parameters today..." value={journalNotes} onChange={e => setJournalNotes(e.target.value)} />
+                <textarea className="form-notes-textarea" placeholder="Describe anything that impacted your wellness today..." value={journalNotes} onChange={e => setJournalNotes(e.target.value)} />
 
                 <div style={{ display: 'flex', gap: '12px' }}>
                   <button type="submit" disabled={isFormSubmitting} className="modal-action-btn-primary" style={{ margin: 0, flex: 2 }}>
