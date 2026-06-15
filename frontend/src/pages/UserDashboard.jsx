@@ -85,32 +85,29 @@ const CustomCircadianTooltip = ({ active, payload }) => {
 const UserDashboard = () => {
   const { user } = useAuth();
   
-  // Navigation layout states: 'calendar' | 'new-entry' | 'history' | 'analytics' | 'notifications'
+  // Navigation layout states
   const [currentView, setCurrentView] = useState('calendar'); 
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const [currentDate, setCurrentDate] = useState(new Date());
 
-  // Analytics rolling snapshot constraints bounds
+  // Analytics snapshot constraint variables
   const [analyticsDaysRange, setAnalyticsDaysRange] = useState(7);
 
-  // Collapsible layperson guide flag states
+  // Collapsible layperson guide flags
   const [showHelpA, setShowHelpA] = useState(false);
   const [showHelpB, setShowHelpB] = useState(false);
   const [showHelpC, setShowHelpC] = useState(false);
 
-  // Micro-habit task completion local checklist cache
-  const [completedTasksCache, setCompletedTasksCache] = useState({});
-
-  // LIVE DATA REGISTERS: Notifications hook defaults to empty array
+  // LIVE DATA REGISTERS
   const [notifications, setNotifications] = useState([]);
   const [isProcessingAction, setIsProcessingAction] = useState(false);
 
-  // Profile data parameters hooks cache
+  // Profile metadata hooks
   const [profileName, setProfileName] = useState('Wellness Member');
   const [avatarUrl, setAvatarUrl] = useState(null);
   
-  // Storage arrays for database telemetry packages
+  // Database data packets caches
   const [monthlyLogs, setMonthlyLogs] = useState({});
   const [allLogsChronological, setAllLogsChronological] = useState([]); 
   const [selectedDayLog, setSelectedDayLog] = useState(null);
@@ -127,17 +124,17 @@ const UserDashboard = () => {
   const [isFormSubmitting, setIsFormSubmitting] = useState(false);
   const [logTargetDate, setLogTargetDate] = useState(new Date().toISOString().split('T')[0]);
   
-  // Modification controllers
+  // Modification state engines
   const [isEditMode, setIsEditMode] = useState(false);
   const [editEntryId, setEditEntryId] = useState(null);
 
-  // Dynamic habit toggle wrappers
+  // Dynamic input habit variables
   const [trackSleep, setTrackSleep] = useState(false);
   const [trackWater, setTrackWater] = useState(false);
   const [trackExercise, setTrackExercise] = useState(false);
   const [trackStudy, setTrackStudy] = useState(false);
 
-  // Discrete fields data bounds
+  // Discrete form constraints bounds
   const [sleepStart, setSleepStart] = useState('');
   const [sleepEnd, setSleepEnd] = useState('');
   const [waterGlasses, setWaterGlasses] = useState('');
@@ -146,7 +143,7 @@ const UserDashboard = () => {
   const [studyStart, setStudyStart] = useState('');
   const [studyEnd, setStudyEnd] = useState('');
 
-  // Calendar parameters bound safely to component root scope level
+  // Calendar parameters calculations bounds
   const year = currentDate.getFullYear();
   const month = currentDate.getMonth();
   const totalDays = new Date(year, month + 1, 0).getDate();
@@ -157,6 +154,7 @@ const UserDashboard = () => {
   for (let d = 1; d <= totalDays; d++) dayGridCells.push({ type: 'day', num: d });
 
   const fetchUserProfileDetails = async () => {
+    if (!user?.id) return;
     try {
       const { data, error = null } = await supabase.from('profile').select('full_name, avatar_url').eq('id', user.id).single();
       if (error) throw error;
@@ -167,13 +165,14 @@ const UserDashboard = () => {
     }
   };
 
-  // REAL PRODUCTION FETCH: Query public.notifications joined cleanly to public.access_requests
   const fetchUserNotificationsSystem = async () => {
+    if (!user?.id) return;
     try {
       const { data, error } = await supabase
         .from('notifications')
-        .select('*, access_requests(*)')
+        .select('*, access_requests!request_id(*)') 
         .eq('profile_id', user.id)
+        .eq('is_read', false) // Only fetch unread alerts/requests to maintain system clarity
         .order('created_at', { ascending: false });
 
       if (error) throw error;
@@ -184,6 +183,7 @@ const UserDashboard = () => {
   };
 
   const fetchDashboardDataSystem = async () => {
+    if (!user?.id) return;
     setLoading(true);
     try {
       const { data: allEntries, error: allErr } = await supabase
@@ -266,22 +266,7 @@ const UserDashboard = () => {
     }
   }, [user, currentDate]);
 
-  const computeTimeDelta = (startTimeStr, fillTimeStr, unit = 'minutes') => {
-    if (!startTimeStr || !fillTimeStr) return 0;
-    const [startH, startM] = startTimeStr.split(':').map(Number);
-    const [endH, endM] = fillTimeStr.split(':').map(Number);
-    let deltaMinutes = (endH * 60 + endM) - (startH * 60 + startM);
-    if (deltaMinutes < 0) deltaMinutes += 24 * 60; 
-    return unit === 'hours' ? parseFloat((deltaMinutes / 60).toFixed(2)) : deltaMinutes;
-  };
-
-  const handleEmptyCellRouting = (targetDay) => {
-    const paddedDay = String(targetDay).padStart(2, '0');
-    const paddedMonth = String(currentDate.getMonth() + 1).padStart(2, '0');
-    const targetDateString = `${year}-${paddedMonth}-${paddedDay}`;
-    triggerNewEntryView(targetDateString);
-  };
-
+  // FIXED FORM ENGINE FUNCTION WRAPPER
   const triggerNewEntryView = (targetDateStr = new Date().toISOString().split('T')[0]) => {
     setIsEditMode(false);
     setEditEntryId(null);
@@ -354,9 +339,14 @@ const UserDashboard = () => {
     }
   };
 
+  // OPTIMISTIC TRANSACTION HANDSHAKE: Instantly filters out the target card to hide it on click
   const handleResolveConsentTransaction = async (notificationId, requestId, statusInput) => {
     setIsProcessingAction(true);
     const booleanAgreementValue = statusInput === 'approved';
+    
+    // UI POP DROP: Optimistically filter the targeted index out before async callbacks resolve
+    setNotifications(prev => prev.filter(n => n.id !== notificationId));
+    
     try {
       const { error: requestErr } = await supabase
         .from('access_requests')
@@ -373,12 +363,27 @@ const UserDashboard = () => {
         .eq('id', notificationId);
       if (notificationErr) throw notificationErr;
 
-      alert(`Consent submitted successfully. Monitoring access token set to: ${statusInput.toUpperCase()}`);
-      await fetchUserNotificationsSystem(); 
+      alert(`Consent submitted successfully. Monitoring channel set to: ${statusInput.toUpperCase()}`);
     } catch (err) {
       alert('Database update transaction dropped: ' + err.message);
+      fetchUserNotificationsSystem(); // Re-sync local storage ledger state on fallback crash
     } finally {
       setIsProcessingAction(false);
+    }
+  };
+
+  // GENERAL DISMISSER PROCESSOR: Flags data row updates to clear notifications cleanly
+  const handleMarkNotificationAsRead = async (notificationId) => {
+    setNotifications(prev => prev.filter(n => n.id !== notificationId));
+    try {
+      const { error } = await supabase
+        .from('notifications')
+        .update({ is_read: true })
+        .eq('id', notificationId);
+      if (error) throw error;
+    } catch (err) {
+      alert('Failed to hide alert: ' + err.message);
+      fetchUserNotificationsSystem();
     }
   };
 
@@ -531,11 +536,7 @@ const UserDashboard = () => {
       }
 
       alert(isEditMode ? 'Log entry updated successfully!' : 'Daily parameters logged and processed successfully!');
-      setIsEditMode(false); setEditEntryId(null); setSelectedMood(null); setJournalNotes('');
-      setTrackSleep(false); setTrackWater(false); setTrackExercise(false); setTrackStudy(false);
-      setSleepStart(''); setSleepEnd(''); setWaterGlasses(''); setExerciseDuration(''); setStudyStart(''); setStudyEnd('');
-      setLogTargetDate(new Date().toISOString().split('T')[0]);
-      
+      triggerNewEntryView();
       fetchDashboardDataSystem();
       fetchUserNotificationsSystem();
       setCurrentView('calendar');
@@ -546,14 +547,7 @@ const UserDashboard = () => {
     }
   };
 
-  const filteredHistoryLogs = allLogsChronological.filter(item => {
-    const textTargetString = (item.notes || '').toLowerCase();
-    const moodNameString = moodMetaConfig[item.mood_id]?.name.toLowerCase() || '';
-    const query = searchQuery.toLowerCase();
-    return (textTargetString.includes(query) || moodNameString.includes(query)) && (moodFilter === 'all' || item.mood_id === parseInt(moodFilter));
-  });
-
-  // Calculate stats dynamically for rolling elements
+  // Statistics loops parsing arrays
   const rollingWeekLogs = allLogsChronological.slice(0, 7);
   let avgSleep = 0, avgWater = 0, totalExercise = 0, totalStudy = 0;
   let sleepLoggedDays = 0, waterLoggedDays = 0, computedWellnessScore = 0;
@@ -604,17 +598,15 @@ const UserDashboard = () => {
         triggeredAdviceAlerts.push({ severity: 'high', message: `Sudden Mood Drop: Your metric index shifted down from ${pastMoodName} to ${presentMoodName}. Take some time for self-care.` });
       }
     }
-    const trailingFiveLogs = allLogsChronological.slice(0, 5);
-    if (trailingFiveLogs.length >= 5 && trailingFiveLogs.every(l => l.subActivities?.sleep && parseFloat(l.subActivities.sleep.duration_hours) < 5)) {
-      triggeredAdviceAlerts.push({ severity: 'medium', message: "Critical Sleep Deficit: Sleep duration has been under 5 hours for 5 consecutive records. Prioritize recovery tonight." });
-    }
-    const trailingThreeLogs = allLogsChronological.slice(0, 3);
-    if (trailingThreeLogs.length >= 3 && trailingThreeLogs.every(l => l.subActivities?.water && parseInt(l.subActivities.water.glasses_count) < 6)) {
-      triggeredAdviceAlerts.push({ severity: 'medium', message: "Dehydration Warning: Fluid intake has dropped below 6 glasses for 3 consecutive days. Drink some water now." });
-    }
   }
 
-  // Set chart rendering scopes
+  const filteredHistoryLogs = allLogsChronological.filter(item => {
+    const textTargetString = (item.notes || '').toLowerCase();
+    const moodNameString = moodMetaConfig[item.mood_id]?.name.toLowerCase() || '';
+    const query = searchQuery.toLowerCase();
+    return (textTargetString.includes(query) || moodNameString.includes(query)) && (moodFilter === 'all' || item.mood_id === parseInt(moodFilter));
+  });
+
   const targetAnalyticsLogs = allLogsChronological.slice(0, analyticsDaysRange).reverse();
 
   const correlationChartData = targetAnalyticsLogs.map(log => {
@@ -655,7 +647,6 @@ const UserDashboard = () => {
     };
   }).filter(item => item['Bedtime Hour Index'] > 0);
 
-  // Evaluate Long-Term Analytics Engine Rules Matrix
   const longitudinalInsightRecommendations = [];
 
   if (targetAnalyticsLogs.length >= 3) {
@@ -670,36 +661,14 @@ const UserDashboard = () => {
         });
       }
     }
-
-    const healthySleepDays = targetAnalyticsLogs.filter(l => l.subActivities?.sleep && parseFloat(l.subActivities.sleep.duration_hours) >= 7);
-    const lowSleepDays = targetAnalyticsLogs.filter(l => !l.subActivities?.sleep || parseFloat(l.subActivities.sleep.duration_hours) < 7);
-    
-    if (healthySleepDays.length >= 2 && lowSleepDays.length >= 2) {
-      const avgMoodHealthy = healthySleepDays.reduce((acc, current) => acc + current.mood_id, 0) / healthySleepDays.length;
-      const avgMoodLow = lowSleepDays.reduce((acc, current) => acc + current.mood_id, 0) / lowSleepDays.length;
-      if (avgMoodHealthy > avgMoodLow) {
-        longitudinalInsightRecommendations.push({
-          isWarning: false,
-          message: `Sustained Rest Correlation Verified (Rule SL3): Your daily mood averages significantly higher (${avgMoodHealthy.toFixed(1)} vs ${avgMoodLow.toFixed(1)}) on blocks where sleep metrics hit 7+ hours.`
-        });
-      }
-    }
-
-    const optimalHydrationDays = targetAnalyticsLogs.filter(l => l.subActivities?.water && parseInt(l.subActivities.water.glasses_count) >= 6);
-    if (optimalHydrationDays.length >= 3) {
-      const highHydrationMoodAverage = optimalHydrationDays.reduce((acc, current) => acc + current.mood_id, 0) / optimalHydrationDays.length;
-      if (highHydrationMoodAverage >= 3.5) {
-        longitudinalInsightRecommendations.push({
-          isWarning: false,
-          message: "Positive Fluid Velocity (Rule HY2): Maintaining daily hydration above 6 glasses correlates directly with sustained neutral-to-happy tracking weeks."
-        });
-      }
-    }
   }
 
-  // Count active unread entries dynamically from the live database payload array
   const activeUnreadNotificationsCount = notifications.filter(n => !n.is_read).length;
   const arcStrokeOffset = circleCircumference - (computedWellnessScore / 100) * circleCircumference;
+
+  if (!user?.id) {
+    return <div className="dashboard-layout"><p style={{ margin: 'auto', color: '#8d99ae' }}>Initializing authorized encryption keys...</p></div>;
+  }
 
   return (
     <div className="dashboard-layout">
@@ -751,7 +720,7 @@ const UserDashboard = () => {
               {avatarUrl ? (
                 <img src={avatarUrl} alt="User profile" className="avatar-image-render" />
               ) : (
-                <span style={{ fontSize: '16px', fontWeight: 'bold', color: '#6b9b84' }}>{(profileName || 'W')[0].toUpperCase()}</span>
+                <span style={{ fontSize: '16px', fontWeight: 'bold', color: '#6b9b84' }}>{profileName[0].toUpperCase()}</span>
               )}
             </button>
             {isDropdownOpen && (
@@ -789,19 +758,17 @@ const UserDashboard = () => {
                       <span className="gauge-percentage-text">{allLogsChronological.length > 0 ? `${computedWellnessScore}%` : '--'}</span>
                     </div>
                   </div>
-                  <p style={{ fontSize: '12px', color: '#8d99ae', margin: '8px 0 0 0', lineHeight: 1.4 }}>Rolling 7-day unified status weight index calculation</p>
+                  <p style={{ fontSize: '12px', color: '#8d99ae', margin: '8px 0 0 0', lineHeight: 1.4 }}>Rolling 7-day snapshot calculation weight index</p>
                 </div>
 
                 <div className="alerts-center-card">
-                  <h4 className="alerts-header-title" style={{ color: '#4a4e69', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <DashboardIcons.Insights /> Automated Insights Engine
-                  </h4>
+                  <h4 className="alerts-header-title"><DashboardIcons.Insights /> Automated Insights Engine</h4>
                   <div className="alerts-scroll-container">
                     {allLogsChronological.length === 0 ? (
-                      <span className="alert-empty-state">Log a few parameters rows to activate real-time tracking scripts.</span>
+                      <span className="alert-empty-state">Log a few parameter rows to activate active analytics tracking rules.</span>
                     ) : triggeredAdviceAlerts.length === 0 ? (
                       <div className="alert-message-strip positive-state" style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                        <DashboardIcons.SuccessCheck /> Good job! Your tracked lifestyle habits and emotional stability indexes have been consistent for the past 7 days.
+                        <DashboardIcons.SuccessCheck /> Good job! Your tracked lifestyle habits and emotional stability indexes are stable.
                       </div>
                     ) : (
                       triggeredAdviceAlerts.map((alert, idx) => (
@@ -883,7 +850,7 @@ const UserDashboard = () => {
             </>
           )}
 
-          {/* VIEW TAB B: TREND ANALYTICS */}
+          {/* TREND ANALYTICS VIEW */}
           {currentView === 'analytics' && (
             <div>
               <div className="workspace-header">
@@ -905,9 +872,8 @@ const UserDashboard = () => {
                 <div className="analytics-chart-card">
                   <div className="analytics-chart-header-cluster">
                     <div>
-                      {/* FIXED TYPO: Inserted missing syntax colon directly into the fontWeight primitive object property */}
                       <h4 style={{ margin: 0, fontSize: '15px', fontWeight: 700, color: '#4a4e69' }}>How Your Habits Connect with Your Well-being</h4>
-                      <span style={{ display: 'block', fontSize: '11px', color: '#8d99ae', fontWeight: 500, fontStyle: 'italic', marginTop: '2px' }}>Relational Habit-to-Mood Cross Matrix (Rules SL3 & HY2 Evaluation)</span>
+                      <span style={{ display: 'block', fontSize: '11px', color: '#8d99ae', fontWeight: 500, fontStyle: 'italic', marginTop: '2px' }}>Relational Habit-to-Mood Cross Matrix</span>
                     </div>
                     <button className={`chart-info-trigger-btn ${showHelpA ? 'active-help' : ''}`} onClick={() => setShowHelpA(!showHelpA)}>
                       <DashboardIcons.Help /> {showHelpA ? 'Hide Guide' : 'Explain Chart'}
@@ -916,8 +882,7 @@ const UserDashboard = () => {
 
                   {showHelpA && (
                     <div className="chart-explanation-box">
-                      <p><strong>Layperson Overview:</strong> This graph combines your daily values to see if your hydration volume or rest patterns correspond to higher emotional scores. Look for spots where your peaks align!</p>
-                      <span>Backend Evaluation Engine: Validates Sleep Correlation (Rule SL3) and Fluid Intake Efficiency (Rule HY2).</span>
+                      <p><strong>Layperson Overview:</strong> This graph combines your daily values to see if your hydration volume or rest patterns correspond to higher emotional scores.</p>
                     </div>
                   )}
 
@@ -955,20 +920,20 @@ const UserDashboard = () => {
 
                   {showHelpB && (
                     <div className="chart-explanation-box">
-                      <p><strong>Layperson Overview:</strong> This breaks down your recorded moods as pure percentages of your total logs over this period, giving you an immediate view of your emotional baseline.</p>
-                      <span>Backend Evaluation Engine: Processes flat totals to evaluate percentage density thresholds.</span>
+                      <p><strong>Layperson Overview:</strong> This breaks down your recorded moods as pure percentages of your total logs over this period.</p>
                     </div>
                   )}
 
-                  <div style={{ width: '100%', height: '210px', minWidth: 0, position: 'relative' }}>
+                  <div style={{ width: '100%', height: '240px', minWidth: 0, position: 'relative' }}>
                     <ResponsiveContainer width="100%" height="100%">
                       <PieChart>
-                        <Pie data={pieChartDataData} cx="50%" cy="50%" innerRadius={55} outerRadius={80} paddingAngle={4} dataKey="value">
+                        <Pie data={pieChartDataData} cx="50%" cy="45%" innerRadius={50} outerRadius={70} paddingAngle={4} dataKey="value">
                           {pieChartDataData.map((entry, index) => (
                             <Cell key={`cell-${index}`} fill={entry.color} />
                           ))}
                         </Pie>
                         <Tooltip formatter={(value) => [`${value} logs recorded`]} />
+                        <Legend layout="horizontal" verticalAlign="bottom" align="center" wrapperStyle={{ fontSize: 10, paddingTop: 10 }} />
                       </PieChart>
                     </ResponsiveContainer>
                     {pieChartDataData.length === 0 && (
@@ -992,14 +957,13 @@ const UserDashboard = () => {
 
                   {showHelpC && (
                     <div className="chart-explanation-box">
-                      <p><strong>Layperson Overview:</strong> This chart maps your sleep onset times. Flat paths mean healthy, consistent sleep habits, while sharp zigzag spikes flag irregular schedules that impact recovery rhythms.</p>
-                      <span>Backend Evaluation Engine: Tracks timeline variance triggers to monitor Circadian Shifts (Rule SL2).</span>
+                      <p><strong>Layperson Overview:</strong> This chart maps your sleep onset times. Flat paths mean healthy, consistent sleep habits, while sharp zigzag spikes flag irregular schedules.</p>
                     </div>
                   )}
 
                   <div style={{ width: '100%', height: '220px', minWidth: 0 }}>
                     {bedtimeTimelineData.length === 0 ? (
-                      <p style={{ fontSize: 13, color: '#8d99ae', padding: '40px', textAlign: 'center' }}>No sleep parameters logs recorded inside this assessment window bounds.</p>
+                      <p style={{ fontSize: 13, color: '#8d99ae', padding: '40px', textAlign: 'center' }}>No sleep parameters logs recorded inside this window.</p>
                     ) : (
                       <ResponsiveContainer width="100%" height="100%">
                         <AreaChart data={bedtimeTimelineData} margin={{ top: 10, right: 10, left: -25, bottom: 0 }}>
@@ -1008,7 +972,7 @@ const UserDashboard = () => {
                           <YAxis domain={[20, 29]} tickCount={10} tickFormatter={(v) => `${v >= 24 ? v - 24 : v}:00`} tick={{ fontSize: 11, fill: '#4a4e69' }} axisLine={false} tickLine={false} />
                           
                           <Tooltip content={<CustomCircadianTooltip />} />
-                          <ReferenceLine y={23} stroke="#b78773" strokeDasharray="3 3" opacity={0.6} label={{ value: 'Ideal Schedule Target', fill: '#b78773', fontSize: 10, position: 'insideBottomLeft' }} />
+                          <ReferenceLine y={23} stroke="#b78773" strokeDasharray="3 3" opacity={0.6} label={{ value: 'Ideal Target', fill: '#b78773', fontSize: 10, position: 'insideBottomLeft' }} />
                           
                           <Area type="monotone" dataKey="Bedtime Hour Index" stroke="#b78773" fill="#fdf8f6" strokeWidth={2.5} dot={{ r: 3.5, strokeWidth: 1, fill: '#ffffff' }} />
                         </AreaChart>
@@ -1019,37 +983,24 @@ const UserDashboard = () => {
 
                 <div className="analytics-recommendations-deck">
                   <h4 className="analytics-chart-title" style={{ margin: '0 0 16px 0', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <DashboardIcons.Insights /> Actionable Habits Checklist
+                    <DashboardIcons.Insights /> Longitudinal Insights Engine
                   </h4>
-                  <div style={{ flex: 1, overflowY: 'auto', maxHeight: '220px' }}>
+                  <div style={{ flex: 1, overflowY: 'auto', maxHeight: '220px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
                     {longitudinalInsightRecommendations.length === 0 ? (
                       <div style={{ height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', textAlign: 'center', color: '#81b29a', fontSize: '13px', padding: '20px', gap: '10px' }}>
                         <DashboardIcons.SuccessCheck />
                         <span style={{ fontStyle: 'italic', fontWeight: 500 }}>All lifestyle parameters look healthy across this trailing window.</span>
                       </div>
                     ) : (
-                      longitudinalInsightRecommendations.map((task, idx) => {
-                        const isTaskChecked = !!completedTasksCache[idx];
-                        return (
-                          <div 
-                            key={idx} 
-                            className={`interactive-task-card-node ${isTaskChecked ? 'task-checked-complete' : ''}`}
-                          >
-                            <input 
-                              type="checkbox" 
-                              className="task-checkbox-input" 
-                              checked={isTaskChecked}
-                              onChange={() => setCompletedTasksCache({
-                                ...completedTasksCache,
-                                [idx]: !isTaskChecked
-                              })}
-                            />
-                            <div className="task-content-text-group">
-                              <p className="task-impact-statement">{task.message}</p>
-                            </div>
-                          </div>
-                        );
-                      })
+                      longitudinalInsightRecommendations.map((insight, idx) => (
+                        <div 
+                          key={idx} 
+                          className={`alert-message-strip ${insight.isWarning ? 'medium-severity' : 'positive-state'}`}
+                          style={{ margin: 0, textAlign: 'left', fontSize: '12.5px' }}
+                        >
+                          {insight.message}
+                        </div>
+                      ))
                     )}
                   </div>
                 </div>
@@ -1057,12 +1008,12 @@ const UserDashboard = () => {
             </div>
           )}
 
-          {/* VIEW TAB C: MOOD HISTORY CHRONOLOGICAL LIST LEDGER */}
+          {/* MOOD HISTORY MODULE */}
           {currentView === 'history' && (
             <div>
               <div className="workspace-header">
                 <div>
-                  <h2 style={{ marginBottom: '4px' }}>Mood History</h2>
+                  <h2>Mood History</h2>
                   <p style={{ color: '#8d99ae', margin: 0, fontSize: '14px' }}>Analyze, modify, or drop historical daily log entries chronologically.</p>
                 </div>
                 <button onClick={() => triggerNewEntryView()} className="action-button-compact">
@@ -1091,9 +1042,6 @@ const UserDashboard = () => {
                 {filteredHistoryLogs.length === 0 ? (
                   <div style={{ textAlign: 'center', background: '#ffffff', padding: '40px', borderRadius: '16px', border: '1px solid #e9ecef' }}>
                     <p style={{ color: '#8d99ae', margin: '0 0 16px 0' }}>No matching historical mood records found.</p>
-                    {(searchQuery || moodFilter !== 'all') && (
-                      <button onClick={() => { setSearchQuery(''); setMoodFilter('all'); }} className="history-edit-btn">Clear Active Filters</button>
-                    )}
                   </div>
                 ) : (
                   filteredHistoryLogs.map((item) => {
@@ -1234,7 +1182,7 @@ const UserDashboard = () => {
 
                 </div>
 
-                <label style={{ block: 'block', fontSize: '13px', fontWeight: '600', marginBottom: '6px' }}>Journaling Reflection Notes</label>
+                <label style={{ display: 'block', fontSize: '13px', fontWeight: '600', marginBottom: '6px' }}>Journaling Reflection Notes</label>
                 <textarea className="form-notes-textarea" placeholder="Describe anything that impacted your wellness today..." value={journalNotes} onChange={e => setJournalNotes(e.target.value)} />
 
                 <div style={{ display: 'flex', gap: '12px' }}>
@@ -1249,16 +1197,14 @@ const UserDashboard = () => {
             </div>
           )}
 
-          {/* NOTIFICATION CENTER */}
+          {/* NOTIFICATION CENTER VIEW */}
           {currentView === 'notifications' && (
             <div>
               <div className="workspace-header">
-                <div>
-                  <h2 style={{ marginBottom: '4px' }}>Notification Center</h2>
-                  <p style={{ color: '#8d99ae', margin: 0, fontSize: '14px' }}>
-                    Respond to tracking authorizations requested by assigned practitioners or analyze automated alerts.
-                  </p>
-                </div>
+                <h2>Notification Center</h2>
+                <p style={{ color: '#8d99ae', margin: 0, fontSize: '14px' }}>
+                  Respond to tracking authorizations requested by assigned practitioners or analyze automated alerts.
+                </p>
               </div>
 
               <div className="notification-list-deck">
@@ -1268,7 +1214,7 @@ const UserDashboard = () => {
                   </div>
                 ) : (
                   notifications.map((note) => (
-                    <div key={note.id} className={`notification-card-item ${note.is_read ? 'processed-dim' : ''}`}>
+                    <div key={note.id} className="notification-card-item">
                       <div className="notification-left-block">
                         <div className={`notification-bell-icon-frame ${note.severity_level === 'high' ? 'alert-style' : ''}`}>
                           <DashboardIcons.Insights />
@@ -1282,34 +1228,32 @@ const UserDashboard = () => {
                         </div>
                       </div>
 
-                      <div className="notification-actions-grid">
+                      <div className="notification-actions-grid" style={{ display: 'flex', gap: '8px' }}>
                         {note.request_id ? (
-                          note.access_requests?.user_agreed === true ? (
-                            <span className="status-pill-badge approved">Granted</span>
-                          ) : note.access_requests?.status === 'rejected' ? (
-                            <span className="status-pill-badge rejected">Declined</span>
-                          ) : (
-                            <>
-                              <button 
-                                className="btn-action-approve" 
-                                disabled={isProcessingAction}
-                                onClick={() => handleResolveConsentTransaction(note.id, note.request_id, 'approved')}
-                              >
-                                Grant Access
-                              </button>
-                              <button 
-                                className="btn-action-decline" 
-                                disabled={isProcessingAction}
-                                onClick={() => handleResolveConsentTransaction(note.id, note.request_id, 'rejected')}
-                              >
-                                Decline
-                              </button>
-                            </>
-                          )
+                          <>
+                            {/* AESTHETIC COMPLIANCE BUTTON LAYOUT REALIGNMENT */}
+                            <button 
+                              className="history-edit-btn" 
+                              disabled={isProcessingAction}
+                              onClick={() => handleResolveConsentTransaction(note.id, note.request_id, 'approved')}
+                            >
+                              Grant Access
+                            </button>
+                            <button 
+                              className="history-delete-btn" 
+                              disabled={isProcessingAction}
+                              onClick={() => handleResolveConsentTransaction(note.id, note.request_id, 'rejected')}
+                            >
+                              Decline
+                            </button>
+                          </>
                         ) : (
-                          <span className={`status-pill-badge ${note.severity_level === 'high' ? 'rejected' : 'approved'}`}>
-                            {note.notification_type.toUpperCase()}
-                          </span>
+                          <button 
+                            className="history-edit-btn" 
+                            onClick={() => handleMarkNotificationAsRead(note.id)}
+                          >
+                            Dismiss Alert
+                          </button>
                         )}
                       </div>
                     </div>

@@ -10,7 +10,7 @@ import './UserDashboard.css';
 // Import Recharts charting engines for data visualization
 import { 
   ComposedChart, Line, Bar, XAxis, YAxis, CartesianGrid, Tooltip, 
-  Legend, ResponsiveContainer, PieChart, Pie, Cell, ReferenceArea
+  Legend, ResponsiveContainer, ReferenceArea
 } from 'recharts';
 
 // ========================================================
@@ -53,18 +53,18 @@ const ProfessionalDashboard = () => {
   const [verificationStatus, setVerificationStatus] = useState('loading');
   const [activeSubTab, setActiveSubTab] = useState('pending'); // 'pending' | 'active'
 
-  // Care handshake tracking state arrays
+  // Case ledger matrices lists
   const [pendingIntakeCases, setPendingIntakeCases] = useState([]);
   const [activeMonitoredCases, setActiveMonitoredCases] = useState([]);
   const [isProcessingAction, setIsProcessingAction] = useState(false);
 
-  // Read-only parameters inspection viewer states
+  // Read-only inspection parameters viewer state sets
   const [selectedStudentId, setSelectedStudentId] = useState(null);
   const [selectedStudentName, setSelectedStudentName] = useState('');
   const [studentHistoricalLogs, setStudentHistoricalLogs] = useState([]);
   const [loadingTelemetry, setLoadingTelemetry] = useState(false);
 
-  // --- REGISTRATION PARAMETERS AND STATUS CHECKS ---
+  // --- REGISTRATION PARAMETERS AND STATUS CHECKS MODULE ---
   const executeLicensureVerificationCheck = async () => {
     try {
       const { data, error } = await supabase
@@ -99,7 +99,7 @@ const ProfessionalDashboard = () => {
     return enrichedCases;
   };
 
-  // --- QUERY ACCESS REQUEST HANDSHAKES (image_d5f9b6.png schemas) ---
+  // --- QUERY ACCESS REQUEST HANDSHAKES ---
   const fetchPractitionerCaseLoadsLedger = async () => {
     try {
       // 1. Fetch pending care allocations assigned by admin and approved by student
@@ -121,7 +121,6 @@ const ProfessionalDashboard = () => {
 
       if (activeErr) throw activeErr;
 
-      // REMOVED ALL DUMMY DATA SEEDING LOOPS: Enforces strict data-binding bounds
       const enrichedPending = await hydrateStudentNames(pendingData || []);
       const enrichedActive = await hydrateStudentNames(activeData || []);
       setPendingIntakeCases(enrichedPending);
@@ -143,17 +142,17 @@ const ProfessionalDashboard = () => {
     }
   }, [verificationStatus]);
 
-  // --- LIVE READ-ONLY DATA TELEMETRY LOGS INJECTOR ---
+  // --- LIVE READ-ONLY DATA TELEMETRY LOGS INJECTOR (FIXED: ALIGNED TO profile_id TARGET) ---
   const loadStudentTelemetryStream = async (studentIdString, studentNameString) => {
     setSelectedStudentId(studentIdString);
     setSelectedStudentName(studentNameString);
     setLoadingTelemetry(true);
     try {
-      // Direct query fetch from active student's mood_entry table
+      // Direct query fetch filtering mood entries exactly matching student profile_id column indices
       const { data: moodLogs, error: moodErr } = await supabase
         .from('mood_entry')
         .select('id, mood_id, notes, created_at')
-        .eq('profile_id', studentIdString)
+        .eq('profile_id', studentIdString) // Fixed column matching criteria target loop
         .order('created_at', { ascending: false })
         .limit(7);
 
@@ -161,7 +160,7 @@ const ProfessionalDashboard = () => {
 
       const calculatedChartRows = [];
       
-      // Loop and join cross-activity table constraints to parse live metrics rows
+      // Loop and join cross-activity table constraints to populate parameters metrics rows
       if (moodLogs && moodLogs.length > 0) {
         for (const log of [...moodLogs].reverse()) {
           const dateObj = new Date(log.created_at);
@@ -186,7 +185,7 @@ const ProfessionalDashboard = () => {
             'Mood Index': log.mood_id,
             'Sleep Duration (hrs)': sleepHours,
             'Hydration (Glasses)': waterGlasses,
-            notes: log.notes || "No reflection summary annotations typed for this entry."
+            notes: log.notes || "No text summary annotations typed."
           });
         }
       }
@@ -203,6 +202,15 @@ const ProfessionalDashboard = () => {
     setIsProcessingAction(true);
     const finalStatusFlag = acceptedChoice ? 'active' : 'rejected';
     try {
+      // Pull target record context values to extract student account id safely
+      const { data: requestRow, error: fetchErr } = await supabase
+        .from('access_requests')
+        .select('user_id')
+        .eq('id', requestId)
+        .single();
+
+      if (fetchErr) throw fetchErr;
+
       const { error } = await supabase
         .from('access_requests')
         .update({
@@ -211,6 +219,24 @@ const ProfessionalDashboard = () => {
         })
         .eq('id', requestId);
       if (error) throw error;
+
+      // DISPATCH LOOP: Notify student that practitioner monitoring session initialization parameters are active
+      if (acceptedChoice) {
+        const { data: doctorProfile } = await supabase
+          .from('profile')
+          .select('full_name')
+          .eq('id', user.id)
+          .single();
+
+        await supabase.from('notifications').insert([{
+          profile_id: requestRow.user_id,
+          notification_type: 'info',
+          title: 'Practitioner Monitoring Active',
+          message: `Your assigned healthcare professional, ${doctorProfile?.full_name || 'Verified Practitioner'}, has accepted the tracking session token assignment. Your metrics trends charts are securely linked for active trend review monitoring.`,
+          severity_level: 'medium',
+          is_read: false
+        }]);
+      }
 
       alert(`Intake parameters resolved. Case status changed to: ${finalStatusFlag.toUpperCase()}`);
       setSelectedStudentId(null);
@@ -223,7 +249,7 @@ const ProfessionalDashboard = () => {
   };
 
   if (verificationStatus === 'loading') {
-    return <div className="dashboard-wrapper"><p>Validating professional governance credentials...</p></div>;
+    return <div className="dashboard-wrapper"><p>Validating professional session credentials...</p></div>;
   }
 
   if (verificationStatus !== 'approved') {
@@ -258,7 +284,7 @@ const ProfessionalDashboard = () => {
             <NavIcons.Analytics /><span>Active Monitoring</span>
           </li>
           <li className="sidebar-link-item" onClick={() => supabase.auth.signOut()} style={{ marginTop: 'auto', color: '#e53e3e' }}>
-             離開 <span>Practitioner Exit</span>
+             🚪 <span>Practitioner Exit</span>
           </li>
         </ul>
       </aside>
@@ -282,10 +308,10 @@ const ProfessionalDashboard = () => {
               {activeSubTab === 'pending' && pendingIntakeCases.map(c => (
                 <div key={c.id} className="case-profile-card">
                   <h4>{c.student_name}</h4>
-                  <p>Monitoring assignment generated by Administrator. Double-consent tracking requires your acceptance.</p>
-                  <div style={{ display: 'flex', gap: '8px', marginTop: '8px' }}>
-                    <button className="btn-action-approve" style={{ padding: '6px 12px', fontSize: '12px' }} disabled={isProcessingAction} onClick={() => handleResolveIntakeHandshake(c.id, true)}>Accept Case</button>
-                    <button className="btn-action-decline" style={{ padding: '6px 12px', fontSize: '12px' }} disabled={isProcessingAction} onClick={() => handleResolveIntakeHandshake(c.id, false)}>Decline</button>
+                  <p style={{ fontSize: '12.5px', color: '#6c757d', margin: '4px 0' }}>Monitoring assignment awaiting your case workspace verification acceptance sign-off parameters.</p>
+                  <div style={{ display: 'flex', gap: '8px', marginTop: '10px' }}>
+                    <button className="action-button-compact" style={{ padding: '6px 12px', fontSize: '12px' }} disabled={isProcessingAction} onClick={() => handleResolveIntakeHandshake(c.id, true)}>Accept Case</button>
+                    <button className="history-delete-btn" style={{ padding: '6px 12px', fontSize: '12px' }} disabled={isProcessingAction} onClick={() => handleResolveIntakeHandshake(c.id, false)}>Decline</button>
                   </div>
                 </div>
               ))}
@@ -296,7 +322,7 @@ const ProfessionalDashboard = () => {
                     <h4>{c.student_name}</h4>
                     <span style={{ fontSize: '11px', color: '#81b29a', fontWeight: 700 }}>AUDITING ➔</span>
                   </div>
-                  <p style={{ fontSize: '12px', marginTop: '4px' }}>Consent complete. Click to populate data charts tracking index streams.</p>
+                  <p style={{ fontSize: '12px', marginTop: '4px', color: '#6c757d' }}>Consent complete. Click card node to stream long-term analytics historical logs entries charts.</p>
                 </div>
               ))}
 
@@ -316,7 +342,7 @@ const ProfessionalDashboard = () => {
                 <p style={{ color: '#8d99ae', padding: '60px' }}>Compiling remote chart data indices stream...</p>
               ) : studentHistoricalLogs.length === 0 ? (
                 <div style={{ height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: '#8d99ae', minHeight: '340px' }}>
-                  <p style={{ margin: 0, fontStyle: 'italic', fontSize: '14px' }}>This user has granted permission but has not logged any mood or activity entries yet.</p>
+                  <p style={{ margin: 0, fontStyle: 'italic', fontSize: '14px' }}>This student has granted permission but has not logged any tracking parameters entries inside the ledger yet.</p>
                 </div>
               ) : (
                 <div>
