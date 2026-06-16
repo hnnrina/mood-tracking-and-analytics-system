@@ -42,6 +42,27 @@ const formatDecimalBedtimeToHuman = (decimalHours) => {
   return `${displayHours}:${String(minutes).padStart(2, '0')} ${ampm}${isNextDay ? ' (Next Day)' : ''}`;
 };
 
+// Calculates time delta between two time strings and handles overnight logging seamlessly
+const computeTimeDelta = (startTime, endTime, unit) => {
+  if (!startTime || !endTime) return 0;
+  const [sh, sm] = startTime.split(':').map(Number);
+  const [eh, em] = endTime.split(':').map(Number);
+
+  let startMins = sh * 60 + sm;
+  let endMins = eh * 60 + em;
+
+  // Handle overnight transitions (e.g., Sleep from 11:00 PM to 7:00 AM)
+  if (endMins < startMins) {
+    endMins += 24 * 60;
+  }
+
+  const diffMins = endMins - startMins;
+  if (unit === 'hours') {
+    return parseFloat((diffMins / 60).toFixed(1));
+  }
+  return diffMins; // returns total minutes
+};
+
 // --- RECHARTS GLOBAL CUSTOM TOOLTIP LAYOUTS ---
 const CustomCorrelationTooltip = ({ active, payload }) => {
   if (active && payload && payload.length) {
@@ -172,7 +193,7 @@ const UserDashboard = () => {
         .from('notifications')
         .select('*, access_requests!request_id(*)') 
         .eq('profile_id', user.id)
-        .eq('is_read', false) // Only fetch unread alerts/requests to maintain system clarity
+        .eq('is_read', false)
         .order('created_at', { ascending: false });
 
       if (error) throw error;
@@ -278,6 +299,14 @@ const UserDashboard = () => {
     setCurrentView('new-entry');
   };
 
+  // Handles clicking empty calendar days to route into creation view with the selected date
+  const handleEmptyCellRouting = (dayNum) => {
+    const formattedMonth = String(month + 1).padStart(2, '0');
+    const formattedDay = String(dayNum).padStart(2, '0');
+    const targetDateStr = `${year}-${formattedMonth}-${formattedDay}`;
+    triggerNewEntryView(targetDateStr);
+  };
+
   const runEditLoadingSequence = (logPayload) => {
     setIsModalOpen(false); 
     setIsEditMode(true);
@@ -339,12 +368,10 @@ const UserDashboard = () => {
     }
   };
 
-  // OPTIMISTIC TRANSACTION HANDSHAKE: Instantly filters out the target card to hide it on click
   const handleResolveConsentTransaction = async (notificationId, requestId, statusInput) => {
     setIsProcessingAction(true);
     const booleanAgreementValue = statusInput === 'approved';
     
-    // UI POP DROP: Optimistically filter the targeted index out before async callbacks resolve
     setNotifications(prev => prev.filter(n => n.id !== notificationId));
     
     try {
@@ -366,13 +393,12 @@ const UserDashboard = () => {
       alert(`Consent submitted successfully. Monitoring channel set to: ${statusInput.toUpperCase()}`);
     } catch (err) {
       alert('Database update transaction dropped: ' + err.message);
-      fetchUserNotificationsSystem(); // Re-sync local storage ledger state on fallback crash
+      fetchUserNotificationsSystem(); 
     } finally {
       setIsProcessingAction(false);
     }
   };
 
-  // GENERAL DISMISSER PROCESSOR: Flags data row updates to clear notifications cleanly
   const handleMarkNotificationAsRead = async (notificationId) => {
     setNotifications(prev => prev.filter(n => n.id !== notificationId));
     try {
@@ -1231,7 +1257,6 @@ const UserDashboard = () => {
                       <div className="notification-actions-grid" style={{ display: 'flex', gap: '8px' }}>
                         {note.request_id ? (
                           <>
-                            {/* AESTHETIC COMPLIANCE BUTTON LAYOUT REALIGNMENT */}
                             <button 
                               className="history-edit-btn" 
                               disabled={isProcessingAction}
