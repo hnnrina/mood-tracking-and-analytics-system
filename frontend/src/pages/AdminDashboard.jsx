@@ -47,7 +47,7 @@ const AdminDashboard = () => {
       enriched.push({
         ...item,
         student_name: profileRow?.full_name || 'Anonymous Student',
-        wellness_score: wellnessRow?.wellness_score || 'Uncomputed Baseline'
+        wellness_score: wellnessRow && wellnessRow.wellness_score !== undefined ? wellnessRow.wellness_score : 'Uncomputed Baseline'
       });
     }
     return enriched;
@@ -67,9 +67,25 @@ const AdminDashboard = () => {
     return enriched;
   };
 
+  // PRACTITIONER IDENTITY RESOLVER: Maps practitioner IDs to formatted names and specialties
+  const resolvePractitionerIdentityText = (profId) => {
+    const match = verifiedProfessionals.find(p => p.id === profId);
+    return match ? `${match.name} (${match.profession})` : 'Assigned Specialist Node';
+  };
+
   // --- QUERY HANDLERS ---
   const fetchCriticalSystemFlags = async () => {
     try {
+      // 1. Fetch active or assigned tracking items to find out who is already under care
+      const { data: activeAssignments, error: pairingsErr } = await supabase
+        .from('access_requests')
+        .select('user_id')
+        .in('status', ['assigned', 'active']);
+
+      if (pairingsErr) throw pairingsErr;
+      const assignedUserIds = activeAssignments ? activeAssignments.map(item => item.user_id) : [];
+
+      // 2. Query high-severity active system anomalies flags
       const { data, error } = await supabase
         .from('notifications')
         .select('*')
@@ -78,7 +94,11 @@ const AdminDashboard = () => {
         .eq('is_read', false);
 
       if (error) throw error;
-      const fullyHydratedFlags = await hydrateFlaggedUsersDetails(data || []);
+
+      // 3. Filter out rows for any student profiles who are already assigned to a clinical specialist
+      const filteredFlags = (data || []).filter(flag => !assignedUserIds.includes(flag.profile_id));
+
+      const fullyHydratedFlags = await hydrateFlaggedUsersDetails(filteredFlags);
       setCriticalFlags(fullyHydratedFlags);
     } catch (err) {
       console.error('Error fetching system critical indicators:', err.message);
@@ -137,11 +157,12 @@ const AdminDashboard = () => {
 
   const synchronizeMasterAdminData = async () => {
     setLoading(true);
+    // Fetch practitioner identities list first so synchronous mappings function seamlessly during layout evaluation loops
+    await fetchApprovedPractitionersList();
     await Promise.all([
       fetchCriticalSystemFlags(),
       fetchPendingVerifications(),
-      fetchActiveCarePairings(),
-      fetchApprovedPractitionersList()
+      fetchActiveCarePairings()
     ]);
     setLoading(false);
   };
@@ -289,30 +310,32 @@ const AdminDashboard = () => {
                         No untriaged student distress flags require immediate care routing.
                       </div>
                     ) : (
-                      criticalFlags.map((flag) => (
-                        <div key={flag.id} className="notification-card-item" style={{ borderLeft: '5px solid #e53e3e' }}>
-                          <div className="notification-left-block">
-                            <div className="notification-bell-icon-frame alert-style">⚠️</div>
-                            <div className="notification-text-details" style={{ textAlign: 'left' }}>
-                              <h4>Automatic Low-Wellness Boundary Flag Triggered</h4>
-                              <p style={{ margin: '6px 0', fontSize: '14px', color: '#4a4e69' }}>
-                                👤 <strong>Student Full Name:</strong> {flag.student_name}
-                                <span style={{ marginLeft: '12px', padding: '2px 8px', background: '#fff5f5', color: '#e53e3e', borderRadius: '4px', fontWeight: 'bold' }}>
-                                  Wellness Index: {flag.wellness_score}%
-                                </span>
-                              </p>
-                              <p style={{ color: '#6c757d', fontStyle: 'italic', fontSize: '13px' }}>"{flag.message}"</p>
-                              <span className="notification-timestamp-tag">Trapped: {new Date(flag.created_at).toLocaleString()}</span>
+                      criticalFlags.map((flag) => {
+                        const scoreDisplayText = typeof flag.wellness_score === 'number' ? `${flag.wellness_score}%` : flag.wellness_score;
+                        return (
+                          <div key={flag.id} className="notification-card-item" style={{ borderLeft: '5px solid #e53e3e' }}>
+                            <div className="notification-left-block">
+                              <div className="notification-bell-icon-frame alert-style">⚠️</div>
+                              <div className="notification-text-details" style={{ textAlign: 'left' }}>
+                                <h4>Automatic Low-Wellness Boundary Flag Triggered</h4>
+                                <p style={{ margin: '6px 0', fontSize: '14px', color: '#4a4e69' }}>
+                                  👤 <strong>Student Full Name:</strong> {flag.student_name}
+                                  <span style={{ marginLeft: '12px', padding: '2px 8px', background: '#fff5f5', color: '#e53e3e', borderRadius: '4px', fontWeight: 'bold' }}>
+                                    Wellness Index: {scoreDisplayText}
+                                  </span>
+                                </p>
+                                <p style={{ color: '#6c757d', fontStyle: 'italic', fontSize: '13px' }}>"{flag.message}"</p>
+                                <span className="notification-timestamp-tag">Trapped: {new Date(flag.created_at).toLocaleString()}</span>
+                              </div>
+                            </div>
+                            <div className="notification-actions-grid">
+                              <button className="history-edit-btn" style={{ borderColor: '#81b29a', color: '#81b29a' }} onClick={() => setSelectedFlag(flag)}>
+                                Assign Practitioner
+                              </button>
                             </div>
                           </div>
-                          <div className="notification-actions-grid">
-                            {/* AESTHETIC COMPLIANCE BUTTON LAYOUT REALIGNMENT */}
-                            <button className="history-edit-btn" style={{ borderColor: '#81b29a', color: '#81b29a' }} onClick={() => setSelectedFlag(flag)}>
-                              Assign Practitioner
-                            </button>
-                          </div>
-                        </div>
-                      ))
+                        );
+                      })
                     )}
                   </div>
                 </div>
@@ -421,9 +444,11 @@ const AdminDashboard = () => {
               <button className="close-modal-x" onClick={() => setSelectedFlag(null)}>×</button>
             </div>
 
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '20px', textSalign: 'left' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '20px', textAlign: 'left' }}>
               <p style={{ margin: 0, fontSize: '14.5px', color: '#4a4e69' }}><strong>Student Target:</strong> {selectedFlag.student_name}</p>
-              <p style={{ margin: 0, fontSize: '14.5px', color: '#e53e3e', fontWeight: 600 }}><strong>Latest Risk score:</strong> {selectedFlag.wellness_score}%</p>
+              <p style={{ margin: 0, fontSize: '14.5px', color: '#e53e3e', fontWeight: 600 }}>
+                <strong>Latest Risk Score:</strong> {typeof selectedFlag.wellness_score === 'number' ? `${selectedFlag.wellness_score}%` : selectedFlag.wellness_score}
+              </p>
             </div>
 
             <form onSubmit={handleExecuteCareAssignment}>

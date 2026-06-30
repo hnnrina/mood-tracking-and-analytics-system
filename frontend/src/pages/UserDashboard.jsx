@@ -100,6 +100,24 @@ const CustomCircadianTooltip = ({ active, payload }) => {
   return null;
 };
 
+const CustomPerformanceTooltip = ({ active, payload }) => {
+  if (active && payload && payload.length) {
+    const data = payload[0].payload;
+    return (
+      <div className="custom-chart-tooltip-box">
+        <p className="tooltip-date-header">{data.dateStr}</p>
+        <p style={{ color: '#f39c12', margin: '4px 0', fontSize: '13px' }}>
+          Focus Study: {data['Focus Study (mins)']} mins
+        </p>
+        <p style={{ color: '#10b981', margin: '4px 0', fontSize: '13px' }}>
+          Exercise Time: {data['Exercise Time (mins)']} mins
+        </p>
+      </div>
+    );
+  }
+  return null;
+};
+
 // ========================================================
 // MAIN DASHBOARD COMPONENT WORKSPACE
 // ========================================================
@@ -119,6 +137,7 @@ const UserDashboard = () => {
   const [showHelpA, setShowHelpA] = useState(false);
   const [showHelpB, setShowHelpB] = useState(false);
   const [showHelpC, setShowHelpC] = useState(false);
+  const [showHelpD, setShowHelpD] = useState(false);
 
   // LIVE DATA REGISTERS
   const [notifications, setNotifications] = useState([]);
@@ -189,7 +208,7 @@ const UserDashboard = () => {
   const fetchUserNotificationsSystem = async () => {
     if (!user?.id) return;
     try {
-      const { data, error } = await supabase
+      const { data, error = null } = await supabase
         .from('notifications')
         .select('*, access_requests!request_id(*)') 
         .eq('profile_id', user.id)
@@ -615,7 +634,7 @@ const UserDashboard = () => {
     computedWellnessScore = Math.round((finalMoodCoeff * 0.4 + finalSleepCoeff * 0.3 + finalExerciseCoeff * 0.2 + finalWaterCoeff * 0.1) * 100);
 
     if (allLogsChronological.slice(0, 3).every(l => l.mood_id <= 2) && allLogsChronological.length >= 3) {
-      triggeredAdviceAlerts.push({ severity: 'high', message: "Low Mood Streak: Emotional stability indicators have been downcast for 3 consecutive entries. Review notes data structures with an assigned practitioner." });
+      triggeredAdviceAlerts.push({ severity: 'high', message: "Low Mood Streak: Emotional stability indicators have been downcast for 3 consecutive days. Review notes data structures with an assigned practitioner." });
     }
     if (allLogsChronological.length >= 2) {
       const pastMoodName = moodMetaConfig[allLogsChronological[1]?.mood_id]?.name || 'Unknown';
@@ -642,6 +661,15 @@ const UserDashboard = () => {
       'Mood Index': log.mood_id,
       'Sleep Duration (hrs)': log.subActivities?.sleep ? parseFloat(log.subActivities.sleep.duration_hours) : 0,
       'Hydration (Glasses)': log.subActivities?.water ? parseInt(log.subActivities.water.glasses_count) : 0
+    };
+  });
+
+  const performanceTimelineData = targetAnalyticsLogs.map(log => {
+    const dObj = new Date(log.created_at);
+    return {
+      dateStr: dObj.toLocaleDateString('default', { month: 'short', day: 'numeric' }),
+      'Exercise Time (mins)': log.subActivities?.exercise ? parseInt(log.subActivities.exercise.duration_minutes || 0) : 0,
+      'Focus Study (mins)': log.subActivities?.study ? parseInt(log.subActivities.study.duration_minutes || 0) : 0
     };
   });
 
@@ -688,6 +716,109 @@ const UserDashboard = () => {
       }
     }
   }
+
+  // --- DETERMINISTIC TEXT INTERPRETERS INJECTION MODULE ---
+  const RecentLifestyleInterpreter = () => {
+    if (allLogsChronological.length === 0) return null;
+    
+    const latestLog = allLogsChronological[0];
+    const sleepAmt = latestLog.subActivities?.sleep?.duration_hours ? parseFloat(latestLog.subActivities.sleep.duration_hours) : 0;
+    const waterAmt = latestLog.subActivities?.water?.glasses_count ? parseInt(latestLog.subActivities.water.glasses_count) : 0;
+    const currentMoodName = moodMetaConfig[latestLog.mood_id]?.name || 'Logged State';
+
+    let evaluationSentence = "";
+    let interpretationClass = "positive-state";
+
+    if (latestLog.mood_id >= 4) {
+      evaluationSentence = `Takeaway Summary: You slept a healthy ${sleepAmt} hours and drank ${waterAmt} glasses of water, which successfully correlated with your positive "${currentMoodName}" state during your last tracking entry loop.`;
+      interpretationClass = "positive-state";
+    } else {
+      if (sleepAmt < 6 || waterAmt < 5) {
+        evaluationSentence = `Takeaway Summary: Your shortened rest cycle (${sleepAmt} hrs) or low fluid intake (${waterAmt} glasses) directly co-occurred with an emotional low point ("${currentMoodName}"). Increasing your parameters tomorrow should help lift your recovery trend.`;
+      } else {
+        evaluationSentence = `Takeaway Summary: You logged ${sleepAmt} hours of sleep and drank ${waterAmt} glasses of water. Even though your habits are stable, your mood registered as "${currentMoodName}". Take things easy today and review your notes templates patterns.`;
+      }
+      interpretationClass = "medium-severity";
+    }
+
+    return (
+      <div className={`alert-message-strip ${interpretationClass}`} style={{ marginTop: '16px', textAlign: 'left', fontWeight: '500', fontSize: '12.5px', borderLeftWidth: '4px', margin: 0 }}>
+        💡 {evaluationSentence}
+      </div>
+    );
+  };
+
+  const MoodDensityInterpreter = () => {
+    if (pieChartDataData.length === 0) return null;
+
+    const sortedSlices = [...pieChartDataData].sort((a, b) => b.value - a.value);
+    const dominantSlice = sortedSlices[0];
+    const totalLogsCount = targetAnalyticsLogs.length;
+    const densityPercentage = Math.round((dominantSlice.value / totalLogsCount) * 100);
+
+    const interpretationText = `Distribution Takeaway: Your most frequent emotional state over this window is "${dominantSlice.name}", representing ${densityPercentage}% of your total metrics logs. This highlights a clear structural baseline toward this affect index.`;
+
+    return (
+      <div className="alert-message-strip positive-state" style={{ marginTop: '16px', textAlign: 'left', fontWeight: '500', fontSize: '12.5px', borderLeftWidth: '4px', borderLeftColor: '#778da9', margin: 0 }}>
+        📊 {interpretationText}
+      </div>
+    );
+  };
+
+  const CircadianConsistencyInterpreter = () => {
+    if (bedtimeTimelineData.length === 0) return null;
+
+    let totalHoursAccumulator = 0;
+    bedtimeTimelineData.forEach(item => {
+      totalHoursAccumulator += item['Bedtime Hour Index'];
+    });
+    
+    const averageBedtimeDecimal = totalHoursAccumulator / bedtimeTimelineData.length;
+    const readableAverageTimeText = formatDecimalBedtimeToHuman(averageBedtimeDecimal);
+
+    const hasWarning = longitudinalInsightRecommendations.some(r => r.isWarning);
+    const timelineSummaryText = `Schedule Takeaway: Your sleep onset time averages out around ${readableAverageTimeText}. Looking at the path timeline, your routine shows ${hasWarning ? 'significant volatility, indicating irregular circadian disruption markers' : 'strong stability coefficients, reinforcing healthy emotional restoration paths'}.`;
+
+    return (
+      <div className={`alert-message-strip ${hasWarning ? 'medium-severity' : 'positive-state'}`} style={{ marginTop: '16px', textAlign: 'left', fontWeight: '500', fontSize: '12.5px', borderLeftWidth: '4px', margin: 0 }}>
+        ⏰ {timelineSummaryText}
+      </div>
+    );
+  };
+
+  const HabitPerformanceInterpreter = () => {
+    if (performanceTimelineData.length === 0) return null;
+
+    let totalExerciseMins = 0;
+    let totalStudyMins = 0;
+    performanceTimelineData.forEach(item => {
+      totalExerciseMins += item['Exercise Time (mins)'];
+      totalStudyMins += item['Focus Study (mins)'];
+    });
+
+    const averageExercise = Math.round(totalExerciseMins / performanceTimelineData.length);
+    const averageStudy = Math.round(totalStudyMins / performanceTimelineData.length);
+
+    let performanceSentence = "";
+    let performanceClass = "positive-state";
+
+    if (averageStudy > 90 && averageExercise < 15) {
+      performanceSentence = `Workload Variance Warning: Your focus study time averages a high ${averageStudy} minutes per log, while physical activity remains low at ${averageExercise} minutes. Consider adding light active recovery breaks to avoid mental fatigue.`;
+      performanceClass = "medium-severity";
+    } else if (totalExerciseMins === 0 && totalStudyMins === 0) {
+      performanceSentence = `Activity Insights: No exercise routines or study focus sessions have been tracked during this trailing range window.`;
+      performanceClass = "medium-severity";
+    } else {
+      performanceSentence = `Workload Balance Summary: You are maintaining a healthy equilibrium with an average of ${averageStudy} minutes of daily focus study and ${averageExercise} minutes of active physical activation. This directly benefits your cognitive wellness metrics.`;
+      performanceClass = "positive-state";
+    }
+
+    return (
+      <div className={`alert-message-strip ${performanceClass}`} style={{ marginTop: '16px', textAlign: 'left', fontWeight: '500', fontSize: '12.5px', borderLeftWidth: '4px', margin: 0 }}>
+        🎯 {performanceSentence}
+      </div>
+    );
+  };
 
   const activeUnreadNotificationsCount = notifications.filter(n => !n.is_read).length;
   const arcStrokeOffset = circleCircumference - (computedWellnessScore / 100) * circleCircumference;
@@ -886,7 +1017,7 @@ const UserDashboard = () => {
                 </div>
               </div>
 
-              <div className="analytics-window-toolbar">
+              <div className="analytics-window-toolbar" style={{ marginBottom: '24px' }}>
                 <span style={{ fontSize: '14px', fontWeight: '600', color: '#4a4e69' }}>Select Analytics Filter Bounds:</span>
                 <div className="calendar-nav-buttons">
                   <button className="cal-arrow-btn" style={{ borderColor: analyticsDaysRange === 7 ? '#81b29a' : '#dcdde1', backgroundColor: analyticsDaysRange === 7 ? '#f2f7f5' : '#ffffff', color: analyticsDaysRange === 7 ? '#81b29a' : '#6c757d' }} onClick={() => setAnalyticsDaysRange(7)}>Trailing 7 Logs</button>
@@ -894,46 +1025,130 @@ const UserDashboard = () => {
                 </div>
               </div>
 
-              <div className="analytics-charts-matrix-grid">
-                <div className="analytics-chart-card">
-                  <div className="analytics-chart-header-cluster">
-                    <div>
-                      <h4 style={{ margin: 0, fontSize: '15px', fontWeight: 700, color: '#4a4e69' }}>How Your Habits Connect with Your Well-being</h4>
-                      <span style={{ display: 'block', fontSize: '11px', color: '#8d99ae', fontWeight: 500, fontStyle: 'italic', marginTop: '2px' }}>Relational Habit-to-Mood Cross Matrix</span>
-                    </div>
-                    <button className={`chart-info-trigger-btn ${showHelpA ? 'active-help' : ''}`} onClick={() => setShowHelpA(!showHelpA)}>
-                      <DashboardIcons.Help /> {showHelpA ? 'Hide Guide' : 'Explain Chart'}
-                    </button>
+              {/* TIMELINE STACK: STRETCHED FULL 100% HORIZONTAL SPACE FOR EXTENSIVE 30 DAYS TRACKING */}
+              
+              {/* STACKED CARD A: CROSS-MATRIX TRENDS CHANNELS */}
+              <div className="analytics-chart-card" style={{ width: '100%', marginBottom: '24px' }}>
+                <div className="analytics-chart-header-cluster">
+                  <div>
+                    <h4 style={{ margin: 0, fontSize: '15px', fontWeight: 700, color: '#4a4e69' }}>How Your Habits Connect with Your Well-being</h4>
+                    <span style={{ display: 'block', fontSize: '11px', color: '#8d99ae', fontWeight: 500, fontStyle: 'italic', marginTop: '2px' }}>Relational Habit-to-Mood Cross Matrix</span>
                   </div>
-
-                  {showHelpA && (
-                    <div className="chart-explanation-box">
-                      <p><strong>Layperson Overview:</strong> This graph combines your daily values to see if your hydration volume or rest patterns correspond to higher emotional scores.</p>
-                    </div>
-                  )}
-
-                  <div style={{ width: '100%', height: '260px', minWidth: 0 }}>
-                    <ResponsiveContainer width="100%" height="100%">
-                      <ComposedChart data={correlationChartData} margin={{ top: 10, right: -5, left: -20, bottom: 0 }}>
-                        <CartesianGrid strokeDasharray="3 3" stroke="#f1f3f5" strokeOpacity={0.4} />
-                        <XAxis dataKey="dateStr" tick={{ fontSize: 11, fill: '#9a8c98' }} axisLine={false} tickLine={false} />
-                        <YAxis yAxisId="left" domain={[1, 5]} tickCount={5} tick={{ fontSize: 11, fill: '#4a4e69' }} axisLine={false} tickLine={false} />
-                        <YAxis yAxisId="right" orientation="right" domain={[0, 'auto']} tick={{ fontSize: 11, fill: '#778da9' }} axisLine={false} tickLine={false} />
-                        
-                        <Tooltip content={<CustomCorrelationTooltip />} />
-                        <Legend wrapperStyle={{ fontSize: 11, paddingTop: 10 }} />
-                        
-                        <ReferenceArea y1={7} y2={9} yAxisId="right" fill="#778da9" fillOpacity={0.05} />
-                        
-                        <Bar yAxisId="right" dataKey="Hydration (Glasses)" name="Water Intake" fill="#629098" opacity={0.25} barSize={20} radius={[4, 4, 0, 0]} />
-                        <Line yAxisId="left" type="monotone" dataKey="Mood Index" name="Your Tracked Mood" stroke="#81b29a" strokeWidth={3} dot={{ r: 4, strokeWidth: 1, fill: '#ffffff' }} activeDot={{ r: 6 }} />
-                        <Line yAxisId="right" type="monotone" dataKey="Sleep Duration (hrs)" name="Daily Rest Duration" stroke="#778da9" strokeWidth={2} strokeDasharray="4 4" dot={false} />
-                      </ComposedChart>
-                    </ResponsiveContainer>
-                  </div>
+                  <button className={`chart-info-trigger-btn ${showHelpA ? 'active-help' : ''}`} onClick={() => setShowHelpA(!showHelpA)}>
+                    <DashboardIcons.Help /> {showHelpA ? 'Hide Guide' : 'Explain Chart'}
+                  </button>
                 </div>
 
-                <div className="analytics-chart-card">
+                {showHelpA && (
+                  <div className="chart-explanation-box">
+                    <p><strong>Layperson Overview:</strong> This graph combines your daily values to see if your hydration volume or rest patterns correspond to higher emotional scores.</p>
+                  </div>
+                )}
+
+                <div style={{ width: '100%', height: '260px', minWidth: 0, marginTop: '12px' }}>
+                  <ResponsiveContainer width="100%" height="100%">
+                    <ComposedChart data={correlationChartData} margin={{ top: 10, right: -5, left: -20, bottom: 0 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#f1f3f5" strokeOpacity={0.4} />
+                      <XAxis dataKey="dateStr" tick={{ fontSize: 11, fill: '#9a8c98' }} axisLine={false} tickLine={false} />
+                      <YAxis yAxisId="left" domain={[1, 5]} tickCount={5} tick={{ fontSize: 11, fill: '#4a4e69' }} axisLine={false} tickLine={false} />
+                      <YAxis yAxisId="right" orientation="right" domain={[0, 'auto']} tick={{ fontSize: 11, fill: '#778da9' }} axisLine={false} tickLine={false} />
+                      
+                      <Tooltip content={<CustomCorrelationTooltip />} />
+                      <Legend wrapperStyle={{ fontSize: 11, paddingTop: 10 }} />
+                      <ReferenceArea y1={7} y2={9} yAxisId="right" fill="#778da9" fillOpacity={0.05} />
+                      
+                      <Bar yAxisId="right" dataKey="Hydration (Glasses)" name="Water Intake" fill="#629098" opacity={0.25} barSize={20} radius={[4, 4, 0, 0]} />
+                      <Line yAxisId="left" type="monotone" dataKey="Mood Index" name="Your Tracked Mood" stroke="#81b29a" strokeWidth={3} dot={{ r: 4, strokeWidth: 1, fill: '#ffffff' }} activeDot={{ r: 6 }} />
+                      <Line yAxisId="right" type="monotone" dataKey="Sleep Duration (hrs)" name="Daily Rest Duration" stroke="#778da9" strokeWidth={2} strokeDasharray="4 4" dot={false} />
+                    </ComposedChart>
+                  </ResponsiveContainer>
+                </div>
+                <RecentLifestyleInterpreter />
+              </div>
+
+              {/* STACKED CARD B: BEDTIME SCHEDULE TIMELINE */}
+              <div className="analytics-chart-card" style={{ width: '100%', marginBottom: '24px' }}>
+                <div className="analytics-chart-header-cluster">
+                  <div>
+                    <h4 style={{ margin: 0, fontSize: '15px', fontWeight: 700, color: '#4a4e69' }}>Your Bedtime Schedule Consistency</h4>
+                    <span style={{ display: 'block', fontSize: '11px', color: '#8d99ae', fontWeight: 500, fontStyle: 'italic', marginTop: '2px' }}>Circadian Schedule Variance Timeline (Rule SL2 Evaluation)</span>
+                  </div>
+                  <button className={`chart-info-trigger-btn ${showHelpC ? 'active-help' : ''}`} onClick={() => setShowHelpC(!showHelpC)}>
+                    <DashboardIcons.Help /> {showHelpC ? 'Hide Guide' : 'Explain Chart'}
+                  </button>
+                </div>
+
+                {showHelpC && (
+                  <div className="chart-explanation-box">
+                    <p><strong>Layperson Overview:</strong> This chart maps your sleep onset times. Flat paths mean healthy, consistent sleep habits, while sharp zigzag spikes flag irregular schedules.</p>
+                  </div>
+                )}
+
+                <div style={{ width: '100%', height: '250px', minWidth: 0, marginTop: '12px' }}>
+                  {bedtimeTimelineData.length === 0 ? (
+                    <p style={{ fontSize: 13, color: '#8d99ae', padding: '40px', textAlign: 'center' }}>No sleep parameters logs recorded inside this window.</p>
+                  ) : (
+                    <ResponsiveContainer width="100%" height="100%">
+                      <AreaChart data={bedtimeTimelineData} margin={{ top: 10, right: 10, left: -25, bottom: 0 }}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="#f1f3f5" strokeOpacity={0.4} />
+                        <XAxis dataKey="dateStr" tick={{ fontSize: 11, fill: '#9a8c98' }} axisLine={false} tickLine={false} />
+                        <YAxis domain={[20, 29]} tickCount={10} tickFormatter={(v) => `${v >= 24 ? v - 24 : v}:00`} tick={{ fontSize: 11, fill: '#4a4e69' }} axisLine={false} tickLine={false} />
+                        
+                        <Tooltip content={<CustomCircadianTooltip />} />
+                        <ReferenceLine y={23} stroke="#b78773" strokeDasharray="3 3" opacity={0.6} label={{ value: 'Ideal Target', fill: '#b78773', fontSize: 10, position: 'insideBottomLeft' }} />
+                        <Area type="monotone" dataKey="Bedtime Hour Index" stroke="#b78773" fill="#fdf8f6" strokeWidth={2.5} dot={{ r: 3.5, strokeWidth: 1, fill: '#ffffff' }} />
+                      </AreaChart>
+                    </ResponsiveContainer>
+                  )}
+                </div>
+                <CircadianConsistencyInterpreter />
+              </div>
+
+              {/* STACKED CARD C: FOCUS BALANCE WORKLOAD MATRIX */}
+              <div className="analytics-chart-card" style={{ width: '100%', marginBottom: '24px' }}>
+                <div className="analytics-chart-header-cluster">
+                  <div>
+                    <h4 style={{ margin: 0, fontSize: '15px', fontWeight: 700, color: '#4a4e69' }}>Cognitive Workload vs. Physical Activation</h4>
+                    <span style={{ display: 'block', fontSize: '11px', color: '#8d99ae', fontWeight: 500, fontStyle: 'italic', marginTop: '2px' }}>Relational Study-to-Exercise Balance Analysis (Burnout Mitigation)</span>
+                  </div>
+                  <button className={`chart-info-trigger-btn ${showHelpD ? 'active-help' : ''}`} onClick={() => setShowHelpD(!showHelpD)}>
+                    <DashboardIcons.Help /> {showHelpD ? 'Hide Guide' : 'Explain Chart'}
+                  </button>
+                </div>
+
+                {showHelpD && (
+                  <div className="chart-explanation-box">
+                    <p><strong>Layperson Overview:</strong> This chart maps your study focus minutes alongside physical exercise minutes. Sitting and tracking long study blocks without active movement flags burnout factors.</p>
+                  </div>
+                )}
+
+                <div style={{ width: '100%', height: '250px', minWidth: 0, marginTop: '12px' }}>
+                  {performanceTimelineData.length === 0 ? (
+                    <p style={{ fontSize: 13, color: '#8d99ae', padding: '40px', textAlign: 'center' }}>No performance parameter logs tracked inside this window parameters.</p>
+                  ) : (
+                    <ResponsiveContainer width="100%" height="100%">
+                      <ComposedChart data={performanceTimelineData} margin={{ top: 10, right: 10, left: -25, bottom: 0 }}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="#f1f3f5" strokeOpacity={0.4} />
+                        <XAxis dataKey="dateStr" tick={{ fontSize: 11, fill: '#9a8c98' }} axisLine={false} tickLine={false} />
+                        <YAxis tick={{ fontSize: 11, fill: '#4a4e69' }} axisLine={false} tickLine={false} />
+                        
+                        <Tooltip content={<CustomPerformanceTooltip />} />
+                        <Legend wrapperStyle={{ fontSize: 11, paddingTop: 10 }} />
+                        
+                        <Bar dataKey="Focus Study (mins)" name="Study Focus Block" fill="#f39c12" opacity={0.6} barSize={15} radius={[4, 4, 0, 0]} />
+                        <Line type="monotone" dataKey="Exercise Time (mins)" name="Somatic Activation" stroke="#10b981" strokeWidth={2.5} dot={{ r: 3, fill: '#ffffff' }} />
+                      </ComposedChart>
+                    </ResponsiveContainer>
+                  )}
+                </div>
+                <HabitPerformanceInterpreter />
+              </div>
+
+              {/* RE-SIZED AND RE-COMPACTED SPLIT BOTTOM GRID LAYOUT NODES */}
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px', alignItems: 'stretch' }}>
+                
+                {/* BOTTOM LEFT CARD: DENSITY DISTRIBUTIONS METRICS PIE */}
+                <div className="analytics-chart-card" style={{ margin: 0, display: 'flex', flexDirection: 'column' }}>
                   <div className="analytics-chart-header-cluster">
                     <div>
                       <h4 style={{ margin: 0, fontSize: '15px', fontWeight: 700, color: '#4a4e69' }}>Your General Emotional Density Breakdown</h4>
@@ -950,7 +1165,8 @@ const UserDashboard = () => {
                     </div>
                   )}
 
-                  <div style={{ width: '100%', height: '240px', minWidth: 0, position: 'relative' }}>
+                  {/* FIXED STRUCTURAL BLOCK TO SECURE ENERGETIC RECHARTS ENGINE INITIALIZATION DIMENSIONS */}
+                  <div style={{ width: '100%', height: '240px', position: 'relative', overflow: 'hidden', minWidth: '0px', marginTop: '12px' }}>
                     <ResponsiveContainer width="100%" height="100%">
                       <PieChart>
                         <Pie data={pieChartDataData} cx="50%" cy="45%" innerRadius={50} outerRadius={70} paddingAngle={4} dataKey="value">
@@ -966,61 +1182,24 @@ const UserDashboard = () => {
                       <div style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, color: '#8d99ae' }}>No elements parsed</div>
                     )}
                   </div>
-                </div>
-              </div>
-
-              <div className="analytics-charts-matrix-grid">
-                <div className="analytics-chart-card">
-                  <div className="analytics-chart-header-cluster">
-                    <div>
-                      <h4 style={{ margin: 0, fontSize: '15px', fontWeight: 700, color: '#4a4e69' }}>Your Bedtime Schedule Consistency</h4>
-                      <span style={{ display: 'block', fontSize: '11px', color: '#8d99ae', fontWeight: 500, fontStyle: 'italic', marginTop: '2px' }}>Circadian Schedule Variance Timeline (Rule SL2 Evaluation)</span>
-                    </div>
-                    <button className={`chart-info-trigger-btn ${showHelpC ? 'active-help' : ''}`} onClick={() => setShowHelpC(!showHelpC)}>
-                      <DashboardIcons.Help /> {showHelpC ? 'Hide Guide' : 'Explain Chart'}
-                    </button>
-                  </div>
-
-                  {showHelpC && (
-                    <div className="chart-explanation-box">
-                      <p><strong>Layperson Overview:</strong> This chart maps your sleep onset times. Flat paths mean healthy, consistent sleep habits, while sharp zigzag spikes flag irregular schedules.</p>
-                    </div>
-                  )}
-
-                  <div style={{ width: '100%', height: '220px', minWidth: 0 }}>
-                    {bedtimeTimelineData.length === 0 ? (
-                      <p style={{ fontSize: 13, color: '#8d99ae', padding: '40px', textAlign: 'center' }}>No sleep parameters logs recorded inside this window.</p>
-                    ) : (
-                      <ResponsiveContainer width="100%" height="100%">
-                        <AreaChart data={bedtimeTimelineData} margin={{ top: 10, right: 10, left: -25, bottom: 0 }}>
-                          <CartesianGrid strokeDasharray="3 3" stroke="#f1f3f5" strokeOpacity={0.4} />
-                          <XAxis dataKey="dateStr" tick={{ fontSize: 11, fill: '#9a8c98' }} axisLine={false} tickLine={false} />
-                          <YAxis domain={[20, 29]} tickCount={10} tickFormatter={(v) => `${v >= 24 ? v - 24 : v}:00`} tick={{ fontSize: 11, fill: '#4a4e69' }} axisLine={false} tickLine={false} />
-                          
-                          <Tooltip content={<CustomCircadianTooltip />} />
-                          <ReferenceLine y={23} stroke="#b78773" strokeDasharray="3 3" opacity={0.6} label={{ value: 'Ideal Target', fill: '#b78773', fontSize: 10, position: 'insideBottomLeft' }} />
-                          
-                          <Area type="monotone" dataKey="Bedtime Hour Index" stroke="#b78773" fill="#fdf8f6" strokeWidth={2.5} dot={{ r: 3.5, strokeWidth: 1, fill: '#ffffff' }} />
-                        </AreaChart>
-                      </ResponsiveContainer>
-                    )}
-                  </div>
+                  <MoodDensityInterpreter />
                 </div>
 
-                <div className="analytics-recommendations-deck">
+                {/* BOTTOM RIGHT CARD: LONGITUDINAL REC REGISTRY INSIGHTS BOARD */}
+                <div className="analytics-recommendations-deck" style={{ margin: 0, display: 'flex', flexDirection: 'column', height: '100%' }}>
                   <h4 className="analytics-chart-title" style={{ margin: '0 0 16px 0', display: 'flex', alignItems: 'center', gap: '8px' }}>
                     <DashboardIcons.Insights /> Longitudinal Insights Engine
                   </h4>
-                  <div style={{ flex: 1, overflowY: 'auto', maxHeight: '220px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                  <div style={{ flex: 1, overflowY: 'auto', maxHeight: '310px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
                     {longitudinalInsightRecommendations.length === 0 ? (
-                      <div style={{ height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', textAlign: 'center', color: '#81b29a', fontSize: '13px', padding: '20px', gap: '10px' }}>
+                      <div style={{ height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', textAlign: 'center', color: '#81b29a', fontSize: '13px', padding: '40px 20px', gap: '10px' }}>
                         <DashboardIcons.SuccessCheck />
                         <span style={{ fontStyle: 'italic', fontWeight: 500 }}>All lifestyle parameters look healthy across this trailing window.</span>
                       </div>
                     ) : (
                       longitudinalInsightRecommendations.map((insight, idx) => (
                         <div 
-                          key={idx} 
+                          key={insight.message || idx} 
                           className={`alert-message-strip ${insight.isWarning ? 'medium-severity' : 'positive-state'}`}
                           style={{ margin: 0, textAlign: 'left', fontSize: '12.5px' }}
                         >
@@ -1030,7 +1209,9 @@ const UserDashboard = () => {
                     )}
                   </div>
                 </div>
+
               </div>
+
             </div>
           )}
 
@@ -1038,10 +1219,8 @@ const UserDashboard = () => {
           {currentView === 'history' && (
             <div>
               <div className="workspace-header">
-                <div>
-                  <h2>Mood History</h2>
-                  <p style={{ color: '#8d99ae', margin: 0, fontSize: '14px' }}>Analyze, modify, or drop historical daily log entries chronologically.</p>
-                </div>
+                <h2>Mood History</h2>
+                <p style={{ color: '#8d99ae', margin: 0, fontSize: '14px' }}>Analyze, modify, or drop historical daily log entries chronologically.</p>
                 <button onClick={() => triggerNewEntryView()} className="action-button-compact">
                   + New Entry
                 </button>

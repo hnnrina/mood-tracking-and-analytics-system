@@ -855,9 +855,13 @@
 
 .analytics-charts-matrix-grid {
   display: grid;
-  grid-template-columns: 1fr 340px;
-  gap: 24px;
-  margin-bottom: 24px;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 20px;
+}
+
+/* Isolated rule strictly targeting the bottom two performance cards */
+.analytics-charts-matrix-grid.performance-balance-row {
+  align-items: stretch; /* Forces equal outer card heights down the middle */
 }
 
 .analytics-chart-card {

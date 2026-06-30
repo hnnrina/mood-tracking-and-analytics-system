@@ -102,7 +102,7 @@ const ProfessionalDashboard = () => {
   // --- QUERY ACCESS REQUEST HANDSHAKES ---
   const fetchPractitionerCaseLoadsLedger = async () => {
     try {
-      // 1. Fetch pending care allocations assigned by admin and approved by student
+      // 1. Fetch pending care allocations assigned by admin and approved by student, awaiting professional sign-off
       const { data: pendingData, error: pendingErr } = await supabase
         .from('access_requests')
         .select('*')
@@ -112,11 +112,13 @@ const ProfessionalDashboard = () => {
 
       if (pendingErr) throw pendingErr;
 
-      // 2. Fetch fully activated medical monitoring cases
+      // 2. Fetch fully activated monitoring cases requiring BOTH student and professional active consent checks
       const { data: activeData, error: activeErr } = await supabase
         .from('access_requests')
         .select('*')
         .eq('professional_id', user.id)
+        .eq('user_agreed', true)
+        .eq('professional_agreed', true)
         .eq('status', 'active');
 
       if (activeErr) throw activeErr;
@@ -142,7 +144,7 @@ const ProfessionalDashboard = () => {
     }
   }, [verificationStatus]);
 
-  // --- LIVE READ-ONLY DATA TELEMETRY LOGS INJECTOR (FIXED: ALIGNED TO profile_id TARGET) ---
+  // --- LIVE READ-ONLY DATA TELEMETRY LOGS INJECTOR ---
   const loadStudentTelemetryStream = async (studentIdString, studentNameString) => {
     setSelectedStudentId(studentIdString);
     setSelectedStudentName(studentNameString);
@@ -152,7 +154,7 @@ const ProfessionalDashboard = () => {
       const { data: moodLogs, error: moodErr } = await supabase
         .from('mood_entry')
         .select('id, mood_id, notes, created_at')
-        .eq('profile_id', studentIdString) // Fixed column matching criteria target loop
+        .eq('profile_id', studentIdString)
         .order('created_at', { ascending: false })
         .limit(7);
 
