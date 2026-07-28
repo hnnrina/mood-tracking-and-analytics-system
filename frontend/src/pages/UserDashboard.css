@@ -865,12 +865,17 @@
 }
 
 .analytics-chart-card {
-  background: #ffffff;
-  border-radius: 16px;
-  padding: 24px;
+  background: white;
+  padding: 20px;
+  border-radius: 12px;
   border: 1px solid #e9ecef;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.005);
-  text-align: left;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Forces Recharts to behave inside flex containers */
+.analytics-chart-card > div:not(.analytics-chart-header-cluster) {
+  flex-shrink: 0;
 }
 
 .analytics-chart-title {
