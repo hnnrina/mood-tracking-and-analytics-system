@@ -1,14 +1,21 @@
 // src/pages/UserDashboard.jsx
-import React, { useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { supabase } from '../lib/supabaseClient';
 import { useAuth } from '../context/AuthContext';
 import MindTrackLogo from '../components/MindTrackLogo';
 import { MoodVectors, NavIcons, DashboardIcons } from '../components/MoodVectors';
 import './UserDashboard.css';
+import { 
+  normalizeCalendarDays, 
+  calculateWellnessScore, 
+  evaluateRulesAndAlerts, 
+  generateDashboardInterpreters,
+  formatDecimalHourTo12h
+} from '../engine/wellnessRulesEngine';
 
 // Import Recharts charting engines for data visualization
 import { 
-  ComposedChart, Line, Bar, XAxis, YAxis, CartesianGrid, Tooltip, 
+  ComposedChart, Line, Bar, BarChart, XAxis, YAxis, CartesianGrid, Tooltip, 
   Legend, ResponsiveContainer, PieChart, Pie, Cell, AreaChart, Area,
   ReferenceLine, ReferenceArea
 } from 'recharts';
@@ -39,7 +46,105 @@ const formatDecimalBedtimeToHuman = (decimalHours) => {
   const ampm = hours >= 12 ? 'PM' : 'AM';
   let displayHours = hours % 12;
   if (displayHours === 0) displayHours = 12;
-  return `${displayHours}:${String(minutes).padStart(2, '0')} ${ampm}${isNextDay ? ' (Next Day)' : ''}`;
+  const minuteStr = minutes < 10 ? `0${minutes}` : minutes;
+  return `${displayHours}:${minuteStr} ${ampm}${isNextDay ? ' (+1 day)' : ''}`;
+};
+
+const RecentLifestyleInterpreter = ({ lifestyleSummary }) => {
+  if (!lifestyleSummary || !lifestyleSummary.sentence) return null;
+  return (
+    <div className={`alert-message-strip ${lifestyleSummary.severityClass}`} style={{ marginTop: '16px', textAlign: 'left', fontWeight: '500', fontSize: '12.5px', borderLeftWidth: '4px', margin: 0 }}>
+      💡 {lifestyleSummary.sentence}
+    </div>
+  );
+};
+
+const MoodDensityInterpreter = ({ pieChartDataData, targetAnalyticsLogs }) => {
+  if (!pieChartDataData || pieChartDataData.length === 0) return null;
+
+  const sortedSlices = [...pieChartDataData].sort((a, b) => b.value - a.value);
+  const dominantSlice = sortedSlices[0];
+  const totalLogsCount = targetAnalyticsLogs ? targetAnalyticsLogs.length : 0;
+  const densityPercentage = totalLogsCount ? Math.round((dominantSlice.value / totalLogsCount) * 100) : 0;
+
+  const interpretationText = `Distribution Takeaway: Your most frequent emotional state over this window is "${dominantSlice.name}", representing ${densityPercentage}% of your total metrics logs. This highlights a clear structural baseline toward this affect index.`;
+
+  return (
+    <div className="alert-message-strip positive-state" style={{ marginTop: '16px', textAlign: 'left', fontWeight: '500', fontSize: '12.5px', borderLeftWidth: '4px', borderLeftColor: '#778da9', margin: 0 }}>
+      📊 {interpretationText}
+    </div>
+  );
+};
+
+const CircadianConsistencyInterpreter = ({ sleepScheduleChartData }) => {
+  if (!sleepScheduleChartData || sleepScheduleChartData.length === 0) return null;
+
+  const validSleepLogs = sleepScheduleChartData.filter(d => d.hasSleepLog);
+  if (validSleepLogs.length === 0) return null;
+
+  let totalDuration = 0;
+  let totalBedtime = 0;
+  let totalWaketime = 0;
+  let withinTargetDays = 0;
+
+  validSleepLogs.forEach(log => {
+    totalDuration += log.durationHours;
+    totalBedtime += log.sleepStartDecimal;
+    totalWaketime += log.sleepEndDecimal;
+    if (!log.isWarning) withinTargetDays++;
+  });
+
+  const avgDuration = (totalDuration / validSleepLogs.length).toFixed(1);
+  const avgBedtimeDec = totalBedtime / validSleepLogs.length;
+  const avgWakeDec = totalWaketime / validSleepLogs.length;
+
+  const avgBedtimeStr = formatDecimalHourTo12h(avgBedtimeDec);
+  const avgWakeStr = formatDecimalHourTo12h(avgWakeDec);
+  const totalDaysEvaluated = validSleepLogs.length;
+
+  const hasWarning = withinTargetDays < totalDaysEvaluated;
+
+  const summaryText = `Schedule Takeaway: Your sleep window averaged ${avgDuration} hours over this window (typically ${avgBedtimeStr} – ${avgWakeStr}). Bedtime consistency remained within target on ${withinTargetDays} out of ${totalDaysEvaluated} logged days.`;
+
+  return (
+    <div className={`alert-message-strip ${hasWarning ? 'medium-severity' : 'positive-state'}`} style={{ marginTop: '16px', textAlign: 'left', fontWeight: '500', fontSize: '12.5px', borderLeftWidth: '4px', margin: 0 }}>
+      ⏰ {summaryText}
+    </div>
+  );
+};
+
+const HabitPerformanceInterpreter = ({ performanceTimelineData }) => {
+  if (!performanceTimelineData || performanceTimelineData.length === 0) return null;
+
+  let totalExerciseMins = 0;
+  let totalStudyMins = 0;
+  performanceTimelineData.forEach(item => {
+    totalExerciseMins += item['Exercise Time (mins)'];
+    totalStudyMins += item['Focus Study (mins)'];
+  });
+
+  const averageExercise = Math.round(totalExerciseMins / performanceTimelineData.length);
+  const averageStudy = Math.round(totalStudyMins / performanceTimelineData.length);
+
+  let performanceSentence;
+  let performanceClass;
+
+  if (averageStudy > 90 && averageExercise < 15) {
+    performanceSentence = `Workload Variance Warning: Your focus study time averages a high ${averageStudy} minutes per log, while physical activity remains low at ${averageExercise} minutes. Consider adding light active recovery breaks to avoid mental fatigue.`;
+    performanceClass = "medium-severity";
+  } else if (totalExerciseMins === 0 && totalStudyMins === 0) {
+    performanceSentence = `Activity Insights: No exercise routines or study focus sessions have been tracked during this trailing range window.`;
+    performanceClass = "medium-severity";
+  } else {
+    performanceSentence = `Workload Balance Summary: You are maintaining a healthy equilibrium with an average of ${averageStudy} minutes of daily focus study and ${averageExercise} minutes of active physical activation. This directly benefits your cognitive wellness metrics.`;
+    performanceClass = "positive-state";
+  }
+
+  return (
+    <div className={`alert-message-strip ${performanceClass}`} style={{ marginTop: '16px', textAlign: 'left', fontWeight: '500', fontSize: '12.5px', borderLeftWidth: '4px', margin: 0 }}>
+      🎯 {performanceSentence}
+    </div>
+  );
 };
 
 // Calculates time delta between two time strings and handles overnight logging seamlessly
@@ -63,6 +168,22 @@ const computeTimeDelta = (startTime, endTime, unit) => {
   return diffMins; // returns total minutes
 };
 
+// Crisp Dot Renderer for Dashed Line Series (Masked Background prevents SVG Dash Collision)
+const CrispSlateDot = (props) => {
+  const { cx, cy } = props;
+  if (!cx || !cy) return null;
+  return (
+    <circle 
+      cx={cx} 
+      cy={cy} 
+      r={4} 
+      fill="#ffffff" 
+      stroke="#4a4e69" 
+      strokeWidth={2} 
+    />
+  );
+};
+
 // --- RECHARTS GLOBAL CUSTOM TOOLTIP LAYOUTS ---
 const CustomCorrelationTooltip = ({ active, payload }) => {
   if (active && payload && payload.length) {
@@ -70,13 +191,13 @@ const CustomCorrelationTooltip = ({ active, payload }) => {
     return (
       <div className="custom-chart-tooltip-box">
         <p className="tooltip-date-header">{data.dateStr}</p>
-        <p className="tooltip-data-row" style={{ color: '#81b29a' }}>
+        <p className="tooltip-data-row" style={{ color: '#e07a5f', fontWeight: 600 }}>
           Mood: {moodMetaConfig[data['Mood Index']]?.name || 'Unknown'} ({data['Mood Index']}/5)
         </p>
-        <p className="tooltip-data-row" style={{ color: '#778da9' }}>
+        <p className="tooltip-data-row" style={{ color: '#4a4e69', fontWeight: 600 }}>
           Sleep Duration: {data['Sleep Duration (hrs)']} hrs
         </p>
-        <p className="tooltip-data-row" style={{ color: '#629098' }}>
+        <p className="tooltip-data-row" style={{ color: '#629098', fontWeight: 600 }}>
           Hydration: {data['Hydration (Glasses)']} Glasses
         </p>
       </div>
@@ -85,15 +206,31 @@ const CustomCorrelationTooltip = ({ active, payload }) => {
   return null;
 };
 
-const CustomCircadianTooltip = ({ active, payload }) => {
+const CustomSleepWindowTooltip = ({ active, payload }) => {
   if (active && payload && payload.length) {
     const data = payload[0].payload;
+    if (!data.hasSleepLog) {
+      return (
+        <div className="custom-chart-tooltip-box">
+          <p className="tooltip-date-header">{data.dateStr}</p>
+          <p className="tooltip-data-row" style={{ color: '#8d99ae' }}>No sleep log for this date</p>
+        </div>
+      );
+    }
     return (
       <div className="custom-chart-tooltip-box">
         <p className="tooltip-date-header">{data.dateStr}</p>
-        <p className="tooltip-data-row" style={{ color: '#b78773' }}>
-          Bedtime Target: {formatDecimalBedtimeToHuman(data['Bedtime Hour Index'])}
+        <p className="tooltip-data-row" style={{ color: '#4a4e69', fontWeight: 600 }}>
+          Sleep Window: {formatDecimalHourTo12h(data.sleepStartDecimal)} – {formatDecimalHourTo12h(data.sleepEndDecimal)}
         </p>
+        <p className="tooltip-data-row" style={{ color: '#778da9' }}>
+          Total Duration: {data.durationHours} hrs
+        </p>
+        {data.isWarning && (
+          <p style={{ color: '#e07a5f', fontSize: '11px', marginTop: '4px', fontWeight: 600 }}>
+            ⚠️ Bedtime shifted &gt;1.5h from average target
+          </p>
+        )}
       </div>
     );
   }
@@ -130,8 +267,8 @@ const UserDashboard = () => {
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const [currentDate, setCurrentDate] = useState(new Date());
 
-  // Analytics snapshot constraint variables
-  const [analyticsDaysRange, setAnalyticsDaysRange] = useState(7);
+  // Analytics snapshot constraint variables ('7days' | 'lastMonth')
+  const [analyticsDaysRange, setAnalyticsDaysRange] = useState('7days');
 
   // Collapsible layperson guide flags
   const [showHelpA, setShowHelpA] = useState(false);
@@ -149,10 +286,11 @@ const UserDashboard = () => {
   
   // Database data packets caches
   const [monthlyLogs, setMonthlyLogs] = useState({});
+  const [monthCache, setMonthCache] = useState({});
   const [allLogsChronological, setAllLogsChronological] = useState([]); 
   const [selectedDayLog, setSelectedDayLog] = useState(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const [loading, setLoading] = useState(true);
+  const [, setLoading] = useState(true);
 
   // Search filter tools
   const [searchQuery, setSearchQuery] = useState('');
@@ -225,6 +363,12 @@ const UserDashboard = () => {
   const fetchDashboardDataSystem = async () => {
     if (!user?.id) return;
     setLoading(true);
+    const monthKey = `${year}-${month}`;
+    if (monthCache[monthKey]) {
+      setMonthlyLogs(monthCache[monthKey]);
+    } else {
+      setMonthlyLogs({});
+    }
     try {
       const { data: allEntries, error: allErr } = await supabase
         .from('mood_entry')
@@ -247,36 +391,37 @@ const UserDashboard = () => {
       if (monthErr) throw monthErr;
 
       const hydrateDataPayload = async (sourceEntries) => {
-        const results = [];
-        for (const entry of sourceEntries) {
-          const { data: activities } = await supabase
-            .from('activity_log')
-            .select(`
-              id, activity_type,
-              sleep_activity(duration_hours, start_time, end_time),
-              water_activity(liters_consumed, glasses_count),
-              exercise_activity(duration_minutes, exercise_type),
-              study_activity(duration_minutes, start_time, end_time)
-            `)
-            .eq('mood_entry_id', entry.id);
+        if (!sourceEntries || sourceEntries.length === 0) return [];
+        return await Promise.all(
+          sourceEntries.map(async (entry) => {
+            const { data: activities } = await supabase
+              .from('activity_log')
+              .select(`
+                id, activity_type,
+                sleep_activity(duration_hours, start_time, end_time),
+                water_activity(liters_consumed, glasses_count),
+                exercise_activity(duration_minutes, exercise_type),
+                study_activity(duration_minutes, start_time, end_time)
+              `)
+              .eq('mood_entry_id', entry.id);
 
-          const subMetricsBundle = { sleep: null, water: null, exercise: null, study: null };
-          
-          activities?.forEach(act => {
-            const sleepData = Array.isArray(act.sleep_activity) ? act.sleep_activity[0] : act.sleep_activity;
-            const waterData = Array.isArray(act.water_activity) ? act.water_activity[0] : act.water_activity;
-            const exerciseData = Array.isArray(act.exercise_activity) ? act.exercise_activity[0] : act.exercise_activity;
-            const studyData = Array.isArray(act.study_activity) ? act.study_activity[0] : act.study_activity;
+            const subMetricsBundle = { sleep: null, water: null, exercise: null, study: null };
+            
+            activities?.forEach(act => {
+              const sleepData = Array.isArray(act.sleep_activity) ? act.sleep_activity[0] : act.sleep_activity;
+              const waterData = Array.isArray(act.water_activity) ? act.water_activity[0] : act.water_activity;
+              const exerciseData = Array.isArray(act.exercise_activity) ? act.exercise_activity[0] : act.exercise_activity;
+              const studyData = Array.isArray(act.study_activity) ? act.study_activity[0] : act.study_activity;
 
-            if (act.activity_type === 'Sleep' && sleepData) subMetricsBundle.sleep = { logId: act.id, ...sleepData };
-            if (act.activity_type === 'Water' && waterData) subMetricsBundle.water = { logId: act.id, ...waterData };
-            if (act.activity_type === 'Exercise' && exerciseData) subMetricsBundle.exercise = { logId: act.id, ...exerciseData };
-            if (act.activity_type === 'Study' && studyData) subMetricsBundle.study = { logId: act.id, ...studyData };
-          });
+              if (act.activity_type === 'Sleep' && sleepData) subMetricsBundle.sleep = { logId: act.id, ...sleepData };
+              if (act.activity_type === 'Water' && waterData) subMetricsBundle.water = { logId: act.id, ...waterData };
+              if (act.activity_type === 'Exercise' && exerciseData) subMetricsBundle.exercise = { logId: act.id, ...exerciseData };
+              if (act.activity_type === 'Study' && studyData) subMetricsBundle.study = { logId: act.id, ...studyData };
+            });
 
-          results.push({ ...entry, subActivities: subMetricsBundle });
-        }
-        return results;
+            return { ...entry, subActivities: subMetricsBundle };
+          })
+        );
       };
 
       const consolidatedHistoryArray = await hydrateDataPayload(allEntries);
@@ -290,6 +435,7 @@ const UserDashboard = () => {
         calendarMap[dayNum] = item;
       });
       setMonthlyLogs(calendarMap);
+      setMonthCache(prev => ({ ...prev, [monthKey]: calendarMap }));
 
     } catch (err) {
       console.error('Data loading error sequence dropped:', err.message);
@@ -299,11 +445,14 @@ const UserDashboard = () => {
   };
 
   useEffect(() => {
-    if (user) {
-      fetchUserProfileDetails();
-      fetchDashboardDataSystem();
-      fetchUserNotificationsSystem();
-    }
+    if (!user) return;
+    const loadAllData = async () => {
+      await fetchUserProfileDetails();
+      await fetchDashboardDataSystem();
+      await fetchUserNotificationsSystem();
+    };
+    loadAllData();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user, currentDate]);
 
   // FIXED FORM ENGINE FUNCTION WRAPPER
@@ -501,7 +650,7 @@ const UserDashboard = () => {
         .limit(7);
 
       if (recentHistoricalLogs && recentHistoricalLogs.length > 0) {
-        let cumulativeMoodScore = 0, cumulativeSleepScore = 0, cumulativeExerciseScore = 0, cumulativeWaterScore = 0;
+        let cumulativeMoodScore = 0, cumulativeSleepScore = 0, cumulativeWaterScore = 0;
         let sleepDays = 0, waterDays = 0, totalExerciseMins = 0;
 
         recentHistoricalLogs.forEach(log => {
@@ -518,7 +667,6 @@ const UserDashboard = () => {
             }
             if (act.activity_type === 'Exercise' && act.exercise_activity?.[0]) {
               totalExerciseMins += parseInt(act.exercise_activity[0].duration_minutes);
-              cumulativeExerciseScore += Math.min(parseInt(act.exercise_activity[0].duration_minutes) / 30, 1);
             }
           });
         });
@@ -548,31 +696,13 @@ const UserDashboard = () => {
           .select().single();
 
         if (!analysisErr && analysisSnapshot) {
-          const bulkRecommendationRows = [];
-          if (recentHistoricalLogs.slice(0, 3).every(l => l.mood_id <= 2) && recentHistoricalLogs.length >= 3) {
-            bulkRecommendationRows.push({
-              analysis_id: analysisSnapshot.id, rule_id: 'MT1', alert_severity: 'High',
-              message_content: "Low Mood Streak: Emotional stability indicators have been downcast for 3 consecutive days. Review notes data structures with an assigned practitioner."
-            });
-          }
-          if (recentHistoricalLogs.length >= 2 && (recentHistoricalLogs[0].mood_id <= recentHistoricalLogs[1].mood_id - 2)) {
-            const lastMoodName = moodMetaConfig[recentHistoricalLogs[1].mood_id]?.name || 'Unknown';
-            const currMoodName = moodMetaConfig[recentHistoricalLogs[0].mood_id]?.name || 'Unknown';
-            bulkRecommendationRows.push({
-              analysis_id: analysisSnapshot.id, rule_id: 'MT3', alert_severity: 'High',
-              message_content: `Sudden Mood Drop: Your metrics dropped sharply by 2 levels from ${lastMoodName} to ${currMoodName}. Take some time for self-care.`
-            });
-          }
-          const sleepHoursList = recentHistoricalLogs.slice(0, 5).map(l => {
-            const match = l.activity_log?.find(a => a.activity_type === 'Sleep');
-            return match?.sleep_activity?.[0] ? parseFloat(match.sleep_activity[0].duration_hours) : 8;
-          });
-          if (sleepHoursList.length >= 5 && sleepHoursList.every(h => h < 5)) {
-            bulkRecommendationRows.push({
-              analysis_id: analysisSnapshot.id, rule_id: 'SL1', alert_severity: 'Medium',
-              message_content: "Critical Sleep Deficit: Sleep metrics have fallen below 5 hours for 5 consecutive entries. Prioritize standard rest intervals."
-            });
-          }
+          const evaluatedAlerts = evaluateRulesAndAlerts(continuous7DaysData);
+          const bulkRecommendationRows = evaluatedAlerts.map(alert => ({
+            analysis_id: analysisSnapshot.id,
+            rule_id: alert.id || 'RULE',
+            alert_severity: alert.severity,
+            message_content: alert.message
+          }));
 
           if (bulkRecommendationRows.length > 0) {
             await supabase.from('system_recommendation').insert(bulkRecommendationRows);
@@ -592,58 +722,23 @@ const UserDashboard = () => {
     }
   };
 
-  // Statistics loops parsing arrays
-  const rollingWeekLogs = allLogsChronological.slice(0, 7);
-  let avgSleep = 0, avgWater = 0, totalExercise = 0, totalStudy = 0;
-  let sleepLoggedDays = 0, waterLoggedDays = 0, computedWellnessScore = 0;
-  const triggeredAdviceAlerts = [];
+  // --- CENTRALIZED WELLNESS RULES & ANALYTICS ENGINE INTEGRATION ---
+  const continuous7DaysData = normalizeCalendarDays(allLogsChronological, 7);
+  const continuousAnalyticsData = normalizeCalendarDays(
+    allLogsChronological, 
+    analyticsDaysRange === '7days' ? 7 : 30
+  );
 
-  if (rollingWeekLogs.length > 0) {
-    let cumulativeMoodScore = 0, cumulativeSleepScore = 0, cumulativeExerciseScore = 0, cumulativeWaterScore = 0;
-    rollingWeekLogs.forEach(log => {
-      cumulativeMoodScore += (log.mood_id / 5);
-      if (log.subActivities?.sleep) {
-        const hours = parseFloat(log.subActivities.sleep.duration_hours || 0);
-        avgSleep += hours; sleepLoggedDays++;
-        cumulativeSleepScore += Math.min(hours / 8, 1);
-      }
-      if (log.subActivities?.water) {
-        const glasses = parseInt(log.subActivities.water.glasses_count || 0);
-        avgWater += glasses; waterLoggedDays++;
-        cumulativeWaterScore += Math.min(glasses / 8, 1);
-      }
-      if (log.subActivities?.exercise) {
-        const mins = parseInt(log.subActivities.exercise.duration_minutes || 0);
-        totalExercise += mins;
-        cumulativeExerciseScore += Math.min(mins / 30, 1);
-      }
-      if (log.subActivities?.study) {
-        totalStudy += parseInt(log.subActivities.study.duration_minutes || 0);
-      }
-    });
+  const {
+    computedWellnessScore,
+    mc, sc, hc, ec,
+    avgSleep, avgWater,
+    totalExercise, totalStudy
+  } = calculateWellnessScore(continuous7DaysData);
 
-    const N = rollingWeekLogs.length;
-    avgSleep = sleepLoggedDays > 0 ? parseFloat((avgSleep / sleepLoggedDays).toFixed(1)) : 0;
-    avgWater = waterLoggedDays > 0 ? parseFloat((avgWater / waterLoggedDays).toFixed(1)) : 0;
-
-    const finalMoodCoeff = cumulativeMoodScore / N;
-    const finalSleepCoeff = sleepLoggedDays > 0 ? (cumulativeSleepScore / sleepLoggedDays) : 0.5;
-    const finalExerciseCoeff = totalExercise > 0 ? Math.min(totalExercise / 150, 1) : 0; 
-    const finalWaterCoeff = waterLoggedDays > 0 ? (cumulativeWaterScore / waterLoggedDays) : 0.5;
-
-    computedWellnessScore = Math.round((finalMoodCoeff * 0.4 + finalSleepCoeff * 0.3 + finalExerciseCoeff * 0.2 + finalWaterCoeff * 0.1) * 100);
-
-    if (allLogsChronological.slice(0, 3).every(l => l.mood_id <= 2) && allLogsChronological.length >= 3) {
-      triggeredAdviceAlerts.push({ severity: 'high', message: "Low Mood Streak: Emotional stability indicators have been downcast for 3 consecutive days. Review notes data structures with an assigned practitioner." });
-    }
-    if (allLogsChronological.length >= 2) {
-      const pastMoodName = moodMetaConfig[allLogsChronological[1]?.mood_id]?.name || 'Unknown';
-      const presentMoodName = moodMetaConfig[allLogsChronological[0]?.mood_id]?.name || 'Unknown';
-      if (allLogsChronological[0]?.mood_id <= allLogsChronological[1]?.mood_id - 2) {
-        triggeredAdviceAlerts.push({ severity: 'high', message: `Sudden Mood Drop: Your metric index shifted down from ${pastMoodName} to ${presentMoodName}. Take some time for self-care.` });
-      }
-    }
-  }
+  const triggeredAdviceAlerts = evaluateRulesAndAlerts(continuous7DaysData);
+  const { lifestyleSummary } = generateDashboardInterpreters(continuous7DaysData, moodMetaConfig);
+  const longitudinalInsightRecommendations = evaluateRulesAndAlerts(continuousAnalyticsData);
 
   const filteredHistoryLogs = allLogsChronological.filter(item => {
     const textTargetString = (item.notes || '').toLowerCase();
@@ -652,7 +747,18 @@ const UserDashboard = () => {
     return (textTargetString.includes(query) || moodNameString.includes(query)) && (moodFilter === 'all' || item.mood_id === parseInt(moodFilter));
   });
 
-  const targetAnalyticsLogs = allLogsChronological.slice(0, analyticsDaysRange).reverse();
+  const now = new Date();
+  let targetAnalyticsLogs = allLogsChronological.filter(log => {
+    if (!log.created_at) return false;
+    const logDate = new Date(log.created_at);
+    const diffInDays = (now - logDate) / (1000 * 60 * 60 * 24);
+    return analyticsDaysRange === '7days' ? diffInDays <= 7 : diffInDays <= 30;
+  }).reverse();
+
+  if (targetAnalyticsLogs.length === 0 && allLogsChronological.length > 0) {
+    const fallbackLimit = analyticsDaysRange === '7days' ? 7 : 30;
+    targetAnalyticsLogs = allLogsChronological.slice(0, fallbackLimit).reverse();
+  }
 
   const correlationChartData = targetAnalyticsLogs.map(log => {
     const dObj = new Date(log.created_at);
@@ -686,139 +792,63 @@ const UserDashboard = () => {
     color: moodMetaConfig[idKey].color
   })).filter(slice => slice.value > 0);
 
-  const bedtimeTimelineData = targetAnalyticsLogs.map(log => {
+  const sleepScheduleChartData = targetAnalyticsLogs.map(log => {
     const dObj = new Date(log.created_at);
-    let decimalBedtimeHours = 0;
-    if (log.subActivities?.sleep?.start_time) {
-      const [h, m] = log.subActivities.sleep.start_time.split(':').map(Number);
-      decimalBedtimeHours = h + (m / 60);
-      if (h < 6) decimalBedtimeHours += 24; 
+    const dateStr = dObj.toLocaleDateString('default', { month: 'short', day: 'numeric' });
+    const sleepObj = log.subActivities?.sleep;
+
+    if (sleepObj && sleepObj.start_time && sleepObj.end_time) {
+      const [sH, sM] = sleepObj.start_time.split(':').map(Number);
+      let startDec = sH + (sM / 60);
+      if (sH < 12) startDec += 24;
+
+      const [eH, eM] = sleepObj.end_time.split(':').map(Number);
+      let endDec = eH + (eM / 60);
+      if (endDec <= startDec) endDec += 24;
+
+      const durationHours = parseFloat((endDec - startDec).toFixed(1));
+
+      return {
+        dateStr,
+        sleepRange: [startDec, endDec],
+        sleepStartDecimal: startDec,
+        sleepEndDecimal: endDec,
+        durationHours,
+        hasSleepLog: true
+      };
     }
+
     return {
-      dateStr: dObj.toLocaleDateString('default', { month: 'short', day: 'numeric' }),
-      'Bedtime Hour Index': parseFloat(decimalBedtimeHours.toFixed(2)),
-      rawTimeStr: log.subActivities?.sleep?.start_time || 'No log'
+      dateStr,
+      sleepRange: null,
+      sleepStartDecimal: null,
+      sleepEndDecimal: null,
+      durationHours: 0,
+      hasSleepLog: false
     };
-  }).filter(item => item['Bedtime Hour Index'] > 0);
+  });
 
-  const longitudinalInsightRecommendations = [];
-
-  if (targetAnalyticsLogs.length >= 3) {
-    const validBedtimes = bedtimeTimelineData.map(d => d['Bedtime Hour Index']);
-    if (validBedtimes.length >= 3) {
-      const minSleepOnset = Math.min(...validBedtimes);
-      const maxSleepOnset = Math.max(...validBedtimes);
-      if (maxSleepOnset - minSleepOnset > 3) {
-        longitudinalInsightRecommendations.push({
-          isWarning: true,
-          message: "Circadian Rhythm Instability Detected (Rule SL2): Your sleep onset boundary has drifted by more than 3 hours across this window. Erratic bedtimes penalize overall emotional recovery vectors."
-        });
-      }
-    }
+  const loggedSleepEntries = sleepScheduleChartData.filter(d => d.hasSleepLog);
+  let avgBedtimeDecimal = 23.0;
+  if (loggedSleepEntries.length > 0) {
+    const sumBed = loggedSleepEntries.reduce((acc, curr) => acc + curr.sleepStartDecimal, 0);
+    avgBedtimeDecimal = sumBed / loggedSleepEntries.length;
   }
 
-  // --- DETERMINISTIC TEXT INTERPRETERS INJECTION MODULE ---
-  const RecentLifestyleInterpreter = () => {
-    if (allLogsChronological.length === 0) return null;
-    
-    const latestLog = allLogsChronological[0];
-    const sleepAmt = latestLog.subActivities?.sleep?.duration_hours ? parseFloat(latestLog.subActivities.sleep.duration_hours) : 0;
-    const waterAmt = latestLog.subActivities?.water?.glasses_count ? parseInt(latestLog.subActivities.water.glasses_count) : 0;
-    const currentMoodName = moodMetaConfig[latestLog.mood_id]?.name || 'Logged State';
-
-    let evaluationSentence = "";
-    let interpretationClass = "positive-state";
-
-    if (latestLog.mood_id >= 4) {
-      evaluationSentence = `Takeaway Summary: You slept a healthy ${sleepAmt} hours and drank ${waterAmt} glasses of water, which successfully correlated with your positive "${currentMoodName}" state during your last tracking entry loop.`;
-      interpretationClass = "positive-state";
-    } else {
-      if (sleepAmt < 6 || waterAmt < 5) {
-        evaluationSentence = `Takeaway Summary: Your shortened rest cycle (${sleepAmt} hrs) or low fluid intake (${waterAmt} glasses) directly co-occurred with an emotional low point ("${currentMoodName}"). Increasing your parameters tomorrow should help lift your recovery trend.`;
-      } else {
-        evaluationSentence = `Takeaway Summary: You logged ${sleepAmt} hours of sleep and drank ${waterAmt} glasses of water. Even though your habits are stable, your mood registered as "${currentMoodName}". Take things easy today and review your notes templates patterns.`;
-      }
-      interpretationClass = "medium-severity";
+  sleepScheduleChartData.forEach(entry => {
+    if (entry.hasSleepLog) {
+      entry.isWarning = Math.abs(entry.sleepStartDecimal - avgBedtimeDecimal) > 1.5;
     }
+  });
 
-    return (
-      <div className={`alert-message-strip ${interpretationClass}`} style={{ marginTop: '16px', textAlign: 'left', fontWeight: '500', fontSize: '12.5px', borderLeftWidth: '4px', margin: 0 }}>
-        💡 {evaluationSentence}
-      </div>
-    );
-  };
-
-  const MoodDensityInterpreter = () => {
-    if (pieChartDataData.length === 0) return null;
-
-    const sortedSlices = [...pieChartDataData].sort((a, b) => b.value - a.value);
-    const dominantSlice = sortedSlices[0];
-    const totalLogsCount = targetAnalyticsLogs.length;
-    const densityPercentage = Math.round((dominantSlice.value / totalLogsCount) * 100);
-
-    const interpretationText = `Distribution Takeaway: Your most frequent emotional state over this window is "${dominantSlice.name}", representing ${densityPercentage}% of your total metrics logs. This highlights a clear structural baseline toward this affect index.`;
-
-    return (
-      <div className="alert-message-strip positive-state" style={{ marginTop: '16px', textAlign: 'left', fontWeight: '500', fontSize: '12.5px', borderLeftWidth: '4px', borderLeftColor: '#778da9', margin: 0 }}>
-        📊 {interpretationText}
-      </div>
-    );
-  };
-
-  const CircadianConsistencyInterpreter = () => {
-    if (bedtimeTimelineData.length === 0) return null;
-
-    let totalHoursAccumulator = 0;
-    bedtimeTimelineData.forEach(item => {
-      totalHoursAccumulator += item['Bedtime Hour Index'];
-    });
-    
-    const averageBedtimeDecimal = totalHoursAccumulator / bedtimeTimelineData.length;
-    const readableAverageTimeText = formatDecimalBedtimeToHuman(averageBedtimeDecimal);
-
-    const hasWarning = longitudinalInsightRecommendations.some(r => r.isWarning);
-    const timelineSummaryText = `Schedule Takeaway: Your sleep onset time averages out around ${readableAverageTimeText}. Looking at the path timeline, your routine shows ${hasWarning ? 'significant volatility, indicating irregular circadian disruption markers' : 'strong stability coefficients, reinforcing healthy emotional restoration paths'}.`;
-
-    return (
-      <div className={`alert-message-strip ${hasWarning ? 'medium-severity' : 'positive-state'}`} style={{ marginTop: '16px', textAlign: 'left', fontWeight: '500', fontSize: '12.5px', borderLeftWidth: '4px', margin: 0 }}>
-        ⏰ {timelineSummaryText}
-      </div>
-    );
-  };
-
-  const HabitPerformanceInterpreter = () => {
-    if (performanceTimelineData.length === 0) return null;
-
-    let totalExerciseMins = 0;
-    let totalStudyMins = 0;
-    performanceTimelineData.forEach(item => {
-      totalExerciseMins += item['Exercise Time (mins)'];
-      totalStudyMins += item['Focus Study (mins)'];
-    });
-
-    const averageExercise = Math.round(totalExerciseMins / performanceTimelineData.length);
-    const averageStudy = Math.round(totalStudyMins / performanceTimelineData.length);
-
-    let performanceSentence = "";
-    let performanceClass = "positive-state";
-
-    if (averageStudy > 90 && averageExercise < 15) {
-      performanceSentence = `Workload Variance Warning: Your focus study time averages a high ${averageStudy} minutes per log, while physical activity remains low at ${averageExercise} minutes. Consider adding light active recovery breaks to avoid mental fatigue.`;
-      performanceClass = "medium-severity";
-    } else if (totalExerciseMins === 0 && totalStudyMins === 0) {
-      performanceSentence = `Activity Insights: No exercise routines or study focus sessions have been tracked during this trailing range window.`;
-      performanceClass = "medium-severity";
-    } else {
-      performanceSentence = `Workload Balance Summary: You are maintaining a healthy equilibrium with an average of ${averageStudy} minutes of daily focus study and ${averageExercise} minutes of active physical activation. This directly benefits your cognitive wellness metrics.`;
-      performanceClass = "positive-state";
-    }
-
-    return (
-      <div className={`alert-message-strip ${performanceClass}`} style={{ marginTop: '16px', textAlign: 'left', fontWeight: '500', fontSize: '12.5px', borderLeftWidth: '4px', margin: 0 }}>
-        🎯 {performanceSentence}
-      </div>
-    );
-  };
+  let yMinSleep = 20;
+  let yMaxSleep = 34;
+  if (loggedSleepEntries.length > 0) {
+    const minStart = Math.min(...loggedSleepEntries.map(d => d.sleepStartDecimal));
+    const maxEnd = Math.max(...loggedSleepEntries.map(d => d.sleepEndDecimal));
+    yMinSleep = Math.max(18, Math.floor(minStart - 1));
+    yMaxSleep = Math.min(36, Math.ceil(maxEnd + 1));
+  }
 
   const activeUnreadNotificationsCount = notifications.filter(n => !n.is_read).length;
   const arcStrokeOffset = circleCircumference - (computedWellnessScore / 100) * circleCircumference;
@@ -915,7 +945,23 @@ const UserDashboard = () => {
                       <span className="gauge-percentage-text">{allLogsChronological.length > 0 ? `${computedWellnessScore}%` : '--'}</span>
                     </div>
                   </div>
-                  <p style={{ fontSize: '12px', color: '#8d99ae', margin: '8px 0 0 0', lineHeight: 1.4 }}>Rolling 7-day snapshot calculation weight index</p>
+                  <p style={{ fontSize: '11px', color: '#8d99ae', margin: '8px 0 4px 0', lineHeight: 1.3 }}>4-Metric Weighted Wellness Index</p>
+                  {allLogsChronological.length > 0 && (
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '4px', width: '100%', marginTop: '6px', fontSize: '10px', textAlign: 'center' }}>
+                      <div style={{ background: '#f8f9fa', padding: '3px 4px', borderRadius: '4px', border: '1px solid #e9ecef' }} title="Mood Consistency Index (MSSD)">
+                        <span style={{ color: '#4F46E5', fontWeight: 600 }}>M<sub>c</sub>:</span> {Math.round(mc * 100)}%
+                      </div>
+                      <div style={{ background: '#f8f9fa', padding: '3px 4px', borderRadius: '4px', border: '1px solid #e9ecef' }} title="Sleep/Circadian Consistency Index (StdDev)">
+                        <span style={{ color: '#778da9', fontWeight: 600 }}>S<sub>c</sub>:</span> {Math.round(sc * 100)}%
+                      </div>
+                      <div style={{ background: '#f8f9fa', padding: '3px 4px', borderRadius: '4px', border: '1px solid #e9ecef' }} title="Exercise Consistency Index (Frequency Aggregation)">
+                        <span style={{ color: '#10b981', fontWeight: 600 }}>E<sub>c</sub>:</span> {Math.round(ec * 100)}%
+                      </div>
+                      <div style={{ background: '#f8f9fa', padding: '3px 4px', borderRadius: '4px', border: '1px solid #e9ecef' }} title="Hydration Consistency Index (Capped Rolling Avg)">
+                        <span style={{ color: '#06B6D4', fontWeight: 600 }}>H<sub>c</sub>:</span> {Math.round(hc * 100)}%
+                      </div>
+                    </div>
+                  )}
                 </div>
 
                 <div className="alerts-center-card">
@@ -968,9 +1014,24 @@ const UserDashboard = () => {
               <div className="workspace-header">
                 <h2>{currentDate.toLocaleString('default', { month: 'long' })} {year}</h2>
                 <div className="calendar-nav-buttons">
-                  <button onClick={() => setCurrentDate(new Date(year, month - 1, 1))} className="cal-arrow-btn">◀ Previous</button>
-                  <button onClick={() => setCurrentDate(new Date())} className="cal-arrow-btn">Today</button>
-                  <button onClick={() => setCurrentDate(new Date(year, month + 1, 1))} className="cal-arrow-btn">Next ▶</button>
+                  <button onClick={() => {
+                    const targetDate = new Date(year, month - 1, 1);
+                    const key = `${targetDate.getFullYear()}-${targetDate.getMonth()}`;
+                    setMonthlyLogs(monthCache[key] || {});
+                    setCurrentDate(targetDate);
+                  }} className="cal-arrow-btn">◀ Previous</button>
+                  <button onClick={() => {
+                    const targetDate = new Date();
+                    const key = `${targetDate.getFullYear()}-${targetDate.getMonth()}`;
+                    setMonthlyLogs(monthCache[key] || {});
+                    setCurrentDate(targetDate);
+                  }} className="cal-arrow-btn">Today</button>
+                  <button onClick={() => {
+                    const targetDate = new Date(year, month + 1, 1);
+                    const key = `${targetDate.getFullYear()}-${targetDate.getMonth()}`;
+                    setMonthlyLogs(monthCache[key] || {});
+                    setCurrentDate(targetDate);
+                  }} className="cal-arrow-btn">Next ▶</button>
                   <button onClick={() => triggerNewEntryView()} className="action-button-compact">
                     + Log Entry
                   </button>
@@ -1020,8 +1081,8 @@ const UserDashboard = () => {
               <div className="analytics-window-toolbar" style={{ marginBottom: '24px' }}>
                 <span style={{ fontSize: '14px', fontWeight: '600', color: '#4a4e69' }}>Select Analytics Filter Bounds:</span>
                 <div className="calendar-nav-buttons">
-                  <button className="cal-arrow-btn" style={{ borderColor: analyticsDaysRange === 7 ? '#81b29a' : '#dcdde1', backgroundColor: analyticsDaysRange === 7 ? '#f2f7f5' : '#ffffff', color: analyticsDaysRange === 7 ? '#81b29a' : '#6c757d' }} onClick={() => setAnalyticsDaysRange(7)}>Trailing 7 Logs</button>
-                  <button className="cal-arrow-btn" style={{ borderColor: analyticsDaysRange === 30 ? '#81b29a' : '#dcdde1', backgroundColor: analyticsDaysRange === 30 ? '#f2f7f5' : '#ffffff', color: analyticsDaysRange === 30 ? '#81b29a' : '#6c757d' }} onClick={() => setAnalyticsDaysRange(30)}>Trailing 30 Logs</button>
+                  <button className="cal-arrow-btn" style={{ borderColor: analyticsDaysRange === '7days' ? '#81b29a' : '#dcdde1', backgroundColor: analyticsDaysRange === '7days' ? '#f2f7f5' : '#ffffff', color: analyticsDaysRange === '7days' ? '#81b29a' : '#6c757d' }} onClick={() => setAnalyticsDaysRange('7days')}>Last 7 Days</button>
+                  <button className="cal-arrow-btn" style={{ borderColor: analyticsDaysRange === 'lastMonth' ? '#81b29a' : '#dcdde1', backgroundColor: analyticsDaysRange === 'lastMonth' ? '#f2f7f5' : '#ffffff', color: analyticsDaysRange === 'lastMonth' ? '#81b29a' : '#6c757d' }} onClick={() => setAnalyticsDaysRange('lastMonth')}>Last Month</button>
                 </div>
               </div>
 
@@ -1051,27 +1112,27 @@ const UserDashboard = () => {
                       <CartesianGrid strokeDasharray="3 3" stroke="#f1f3f5" strokeOpacity={0.4} />
                       <XAxis dataKey="dateStr" tick={{ fontSize: 11, fill: '#9a8c98' }} axisLine={false} tickLine={false} />
                       <YAxis yAxisId="left" domain={[1, 5]} tickCount={5} tick={{ fontSize: 11, fill: '#4a4e69' }} axisLine={false} tickLine={false} />
-                      <YAxis yAxisId="right" orientation="right" domain={[0, 'auto']} tick={{ fontSize: 11, fill: '#778da9' }} axisLine={false} tickLine={false} />
+                      <YAxis yAxisId="right" orientation="right" domain={[0, 'auto']} tick={{ fontSize: 11, fill: '#4a4e69' }} axisLine={false} tickLine={false} />
                       
                       <Tooltip content={<CustomCorrelationTooltip />} />
-                      <Legend wrapperStyle={{ fontSize: 11, paddingTop: 10 }} />
-                      <ReferenceArea y1={7} y2={9} yAxisId="right" fill="#778da9" fillOpacity={0.05} />
+                      <Legend wrapperStyle={{ fontSize: 12, paddingTop: 12, fontWeight: 600 }} />
+                      <ReferenceArea y1={7} y2={9} yAxisId="right" fill="#4a4e69" fillOpacity={0.04} />
                       
-                      <Bar yAxisId="right" dataKey="Hydration (Glasses)" name="Water Intake" fill="#629098" opacity={0.25} barSize={20} radius={[4, 4, 0, 0]} />
-                      <Line yAxisId="left" type="monotone" dataKey="Mood Index" name="Your Tracked Mood" stroke="#81b29a" strokeWidth={3} dot={{ r: 4, strokeWidth: 1, fill: '#ffffff' }} activeDot={{ r: 6 }} />
-                      <Line yAxisId="right" type="monotone" dataKey="Sleep Duration (hrs)" name="Daily Rest Duration" stroke="#778da9" strokeWidth={2} strokeDasharray="4 4" dot={false} />
+                      <Bar yAxisId="right" dataKey="Hydration (Glasses)" name="Water Intake" fill="#629098" opacity={0.35} barSize={20} radius={[4, 4, 0, 0]} />
+                      <Line yAxisId="left" type="monotone" dataKey="Mood Index" name="Your Tracked Mood" stroke="#e07a5f" strokeWidth={2.5} dot={{ r: 4.5, stroke: '#e07a5f', strokeWidth: 2, fill: '#ffffff' }} activeDot={{ r: 6.5 }} />
+                      <Line yAxisId="right" type="monotone" dataKey="Sleep Duration (hrs)" name="Daily Rest Duration" stroke="#4a4e69" strokeWidth={2.5} strokeDasharray="6 4" dot={<CrispSlateDot />} activeDot={{ r: 6.5, fill: '#4a4e69', stroke: '#ffffff', strokeWidth: 2 }} />
                     </ComposedChart>
                   </ResponsiveContainer>
                 </div>
-                <RecentLifestyleInterpreter />
+                <RecentLifestyleInterpreter lifestyleSummary={lifestyleSummary} />
               </div>
 
               {/* STACKED CARD B: BEDTIME SCHEDULE TIMELINE */}
               <div className="analytics-chart-card" style={{ width: '100%', marginBottom: '24px' }}>
                 <div className="analytics-chart-header-cluster">
                   <div>
-                    <h4 style={{ margin: 0, fontSize: '15px', fontWeight: 700, color: '#4a4e69' }}>Your Bedtime Schedule Consistency</h4>
-                    <span style={{ display: 'block', fontSize: '11px', color: '#8d99ae', fontWeight: 500, fontStyle: 'italic', marginTop: '2px' }}>Circadian Schedule Variance Timeline (Rule SL2 Evaluation)</span>
+                    <h4 style={{ margin: 0, fontSize: '15px', fontWeight: 700, color: '#4a4e69' }}>Your Sleep Schedule Consistency</h4>
+                    <span style={{ display: 'block', fontSize: '11px', color: '#8d99ae', fontWeight: 500, fontStyle: 'italic', marginTop: '2px' }}>Floating Sleep Window Range Analysis</span>
                   </div>
                   <button className={`chart-info-trigger-btn ${showHelpC ? 'active-help' : ''}`} onClick={() => setShowHelpC(!showHelpC)}>
                     <DashboardIcons.Help /> {showHelpC ? 'Hide Guide' : 'Explain Chart'}
@@ -1080,28 +1141,51 @@ const UserDashboard = () => {
 
                 {showHelpC && (
                   <div className="chart-explanation-box">
-                    <p><strong>Layperson Overview:</strong> This chart maps your sleep onset times. Flat paths mean healthy, consistent sleep habits, while sharp zigzag spikes flag irregular schedules.</p>
+                    <p><strong>Layperson Overview:</strong> This chart shows your complete sleep windows. Consistent bar positions and heights indicate a stable sleep schedule, while shifting bars highlight irregular sleep and wake times.</p>
                   </div>
                 )}
 
-                <div style={{ width: '100%', height: '250px', minWidth: 0, marginTop: '12px' }}>
-                  {bedtimeTimelineData.length === 0 ? (
+                <div style={{ width: '100%', height: '260px', minWidth: 0, marginTop: '12px' }}>
+                  {loggedSleepEntries.length === 0 ? (
                     <p style={{ fontSize: 13, color: '#8d99ae', padding: '40px', textAlign: 'center' }}>No sleep parameters logs recorded inside this window.</p>
                   ) : (
                     <ResponsiveContainer width="100%" height="100%">
-                      <AreaChart data={bedtimeTimelineData} margin={{ top: 10, right: 10, left: -25, bottom: 0 }}>
+                      <BarChart data={sleepScheduleChartData} margin={{ top: 15, right: 15, left: -15, bottom: 0 }}>
                         <CartesianGrid strokeDasharray="3 3" stroke="#f1f3f5" strokeOpacity={0.4} />
                         <XAxis dataKey="dateStr" tick={{ fontSize: 11, fill: '#9a8c98' }} axisLine={false} tickLine={false} />
-                        <YAxis domain={[20, 29]} tickCount={10} tickFormatter={(v) => `${v >= 24 ? v - 24 : v}:00`} tick={{ fontSize: 11, fill: '#4a4e69' }} axisLine={false} tickLine={false} />
-                        
-                        <Tooltip content={<CustomCircadianTooltip />} />
-                        <ReferenceLine y={23} stroke="#b78773" strokeDasharray="3 3" opacity={0.6} label={{ value: 'Ideal Target', fill: '#b78773', fontSize: 10, position: 'insideBottomLeft' }} />
-                        <Area type="monotone" dataKey="Bedtime Hour Index" stroke="#b78773" fill="#fdf8f6" strokeWidth={2.5} dot={{ r: 3.5, strokeWidth: 1, fill: '#ffffff' }} />
-                      </AreaChart>
+                        <YAxis 
+                          domain={[yMinSleep, yMaxSleep]} 
+                          tickFormatter={formatDecimalHourTo12h} 
+                          tick={{ fontSize: 11, fill: '#4a4e69' }} 
+                          axisLine={false} 
+                          tickLine={false} 
+                        />
+                        <Tooltip content={<CustomSleepWindowTooltip />} />
+                        <ReferenceLine 
+                          y={avgBedtimeDecimal} 
+                          stroke="#e07a5f" 
+                          strokeDasharray="4 4" 
+                          strokeWidth={2} 
+                          label={{ 
+                            value: `Target Avg (${formatDecimalHourTo12h(avgBedtimeDecimal)})`, 
+                            fill: '#e07a5f', 
+                            fontSize: 10, 
+                            position: 'insideTopRight' 
+                          }} 
+                        />
+                        <Bar dataKey="sleepRange" name="Sleep Window" radius={[4, 4, 4, 4]} barSize={22}>
+                          {sleepScheduleChartData.map((entry, index) => (
+                            <Cell 
+                              key={`sleep-cell-${index}`} 
+                              fill={entry.hasSleepLog ? (entry.isWarning ? '#e07a5f' : '#778da9') : 'transparent'} 
+                            />
+                          ))}
+                        </Bar>
+                      </BarChart>
                     </ResponsiveContainer>
                   )}
                 </div>
-                <CircadianConsistencyInterpreter />
+                <CircadianConsistencyInterpreter sleepScheduleChartData={sleepScheduleChartData} />
               </div>
 
               {/* STACKED CARD C: FOCUS BALANCE WORKLOAD MATRIX */}
@@ -1141,7 +1225,7 @@ const UserDashboard = () => {
                     </ResponsiveContainer>
                   )}
                 </div>
-                <HabitPerformanceInterpreter />
+                <HabitPerformanceInterpreter performanceTimelineData={performanceTimelineData} />
               </div>
 
               {/* RE-SIZED AND RE-COMPACTED SPLIT BOTTOM GRID LAYOUT NODES */}
@@ -1182,7 +1266,7 @@ const UserDashboard = () => {
                       <div style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, color: '#8d99ae' }}>No elements parsed</div>
                     )}
                   </div>
-                  <MoodDensityInterpreter />
+                  <MoodDensityInterpreter pieChartDataData={pieChartDataData} targetAnalyticsLogs={targetAnalyticsLogs} />
                 </div>
 
                 {/* BOTTOM RIGHT CARD: LONGITUDINAL REC REGISTRY INSIGHTS BOARD */}
