@@ -3,18 +3,19 @@ import React, { useEffect, useState } from 'react';
 import { supabase } from '../lib/supabaseClient';
 import { useAuth } from '../context/AuthContext';
 import MindTrackLogo from '../components/MindTrackLogo';
-import { MoodVectors, NavIcons, DashboardIcons } from '../components/MoodVectors';
+import { NavIcons } from '../components/MoodVectors';
+import { normalizeCalendarDays, calculateWellnessScore } from '../engine/wellnessRulesEngine';
 import './ProfessionalDashboard.css';
 import './UserDashboard.css';
 
-// Import Recharts charting engines for data visualization
+// Recharts engines for data visualization
 import { 
-  ComposedChart, Line, Bar, XAxis, YAxis, CartesianGrid, Tooltip, 
-  Legend, ResponsiveContainer, ReferenceArea
+  ComposedChart, Line, Bar, BarChart, XAxis, YAxis, CartesianGrid, Tooltip, 
+  Legend, ResponsiveContainer 
 } from 'recharts';
 
 // ========================================================
-// GLOBAL SCOPE CONFIGURATIONS & TOOLTIPS (Hoisting Protected)
+// GLOBAL SCOPE CONFIGURATIONS & TOOLTIPS
 // ========================================================
 const moodMetaConfig = {
   1: { name: 'Very Sad', class: 'bg-lvl-1', color: '#e53e3e' },
@@ -24,6 +25,22 @@ const moodMetaConfig = {
   5: { name: 'Very Happy', class: 'bg-lvl-5', color: '#81b29a' },
 };
 
+const formatDecimalHourTo12h = (decimalHours) => {
+  if (decimalHours === null || decimalHours === undefined) return '';
+  let hours = Math.floor(decimalHours);
+  let minutes = Math.round((decimalHours - hours) * 60);
+  let isNextDay = false;
+  if (hours >= 24) {
+    hours -= 24;
+    isNextDay = true;
+  }
+  const ampm = hours >= 12 ? 'PM' : 'AM';
+  let displayHours = hours % 12;
+  if (displayHours === 0) displayHours = 12;
+  const minuteStr = minutes < 10 ? `0${minutes}` : minutes;
+  return `${displayHours}:${minuteStr} ${ampm}${isNextDay ? ' (+1d)' : ''}`;
+};
+
 const CustomClinicalTooltip = ({ active, payload }) => {
   if (active && payload && payload.length) {
     const data = payload[0].payload;
@@ -31,13 +48,36 @@ const CustomClinicalTooltip = ({ active, payload }) => {
       <div className="custom-chart-tooltip-box">
         <p className="tooltip-date-header">{data.dateStr}</p>
         <p className="tooltip-data-row" style={{ color: '#81b29a' }}>
-          Feeling: {moodMetaConfig[data['Mood Index']]?.name || 'Unknown'} ({data['Mood Index']}/5)
+          Mood: {moodMetaConfig[data['Mood Index']]?.name || 'Logged'} ({data['Mood Index']}/5)
         </p>
         <p className="tooltip-data-row" style={{ color: '#778da9' }}>
-          Sleep Window: {data['Sleep Duration (hrs)']} hrs
+          Sleep: {data['Sleep Duration (hrs)']} hrs
         </p>
         <p className="tooltip-data-row" style={{ color: '#629098' }}>
-          Water Volume: {data['Hydration (Glasses)']} Glasses
+          Hydration: {data['Hydration (Glasses)']} Glasses
+        </p>
+      </div>
+    );
+  }
+  return null;
+};
+
+const CustomSleepTooltip = ({ active, payload }) => {
+  if (active && payload && payload.length) {
+    const data = payload[0].payload;
+    const range = data.sleepRange;
+    if (!range || range.length < 2) return null;
+    return (
+      <div className="custom-chart-tooltip-box">
+        <p className="tooltip-date-header">{data.dateStr}</p>
+        <p className="tooltip-data-row" style={{ color: '#778da9' }}>
+          Bedtime: {formatDecimalHourTo12h(range[0])}
+        </p>
+        <p className="tooltip-data-row" style={{ color: '#81b29a' }}>
+          Wake Time: {formatDecimalHourTo12h(range[1])}
+        </p>
+        <p className="tooltip-data-row" style={{ color: '#4a4e69' }}>
+          Duration: {data.duration} hrs
         </p>
       </div>
     );
@@ -51,18 +91,17 @@ const CustomClinicalTooltip = ({ active, payload }) => {
 const ProfessionalDashboard = () => {
   const { user } = useAuth();
   const [verificationStatus, setVerificationStatus] = useState('loading');
-  const [activeSubTab, setActiveSubTab] = useState('pending'); // 'pending' | 'active'
+  const [activeSubTab, setActiveSubTab] = useState('active'); // 'active' | 'pending'
 
   // Case ledger matrices lists
   const [pendingIntakeCases, setPendingIntakeCases] = useState([]);
   const [activeMonitoredCases, setActiveMonitoredCases] = useState([]);
   const [isProcessingAction, setIsProcessingAction] = useState(false);
 
-  // Read-only inspection parameters viewer state sets
-  const [selectedStudentId, setSelectedStudentId] = useState(null);
-  const [selectedStudentName, setSelectedStudentName] = useState('');
-  const [studentHistoricalLogs, setStudentHistoricalLogs] = useState([]);
-  const [loadingTelemetry, setLoadingTelemetry] = useState(false);
+  // Collapsible Analytics State per patient card
+  const [expandedPatientId, setExpandedPatientId] = useState(null);
+  const [patientChartLogs, setPatientChartLogs] = useState({});
+  const [loadingChartId, setLoadingChartId] = useState(null);
 
   // --- REGISTRATION PARAMETERS AND STATUS CHECKS MODULE ---
   const executeLicensureVerificationCheck = async () => {
@@ -81,8 +120,69 @@ const ProfessionalDashboard = () => {
     }
   };
 
-  // IDENTITY RESOLVER: Converts alphanumeric UUIDs to human-readable full names
-  const hydrateStudentNames = async (casesArray) => {
+  // --- COMPOSITE WELLNESS SCORE ENGINE CALCULATOR FOR PATIENTS ---
+  const fetchPatientCompositeScore = async (studentId) => {
+    try {
+      const { data: moodLogs } = await supabase
+        .from('mood_entry')
+        .select(`
+          id, mood_id, notes, created_at,
+          activity_log (
+            activity_type,
+            sleep_activity (duration_hours, start_time, end_time),
+            water_activity (glasses_count, liters_consumed),
+            exercise_activity (duration_minutes),
+            study_activity (duration_minutes)
+          )
+        `)
+        .eq('profile_id', studentId)
+        .order('created_at', { ascending: false })
+        .limit(14);
+
+      if (!moodLogs || moodLogs.length === 0) {
+        return { computedWellnessScore: null };
+      }
+
+      const formattedLogs = moodLogs.map(log => {
+        const subActivities = {};
+        log.activity_log?.forEach(act => {
+          if (act.activity_type === 'Sleep') {
+            const s = Array.isArray(act.sleep_activity) ? act.sleep_activity[0] : act.sleep_activity;
+            if (s) subActivities.sleep = s;
+          }
+          if (act.activity_type === 'Water') {
+            const w = Array.isArray(act.water_activity) ? act.water_activity[0] : act.water_activity;
+            if (w) subActivities.water = w;
+          }
+          if (act.activity_type === 'Exercise') {
+            const e = Array.isArray(act.exercise_activity) ? act.exercise_activity[0] : act.exercise_activity;
+            if (e) subActivities.exercise = e;
+          }
+          if (act.activity_type === 'Study') {
+            const st = Array.isArray(act.study_activity) ? act.study_activity[0] : act.study_activity;
+            if (st) subActivities.study = st;
+          }
+        });
+        return {
+          id: log.id,
+          mood_id: log.mood_id,
+          notes: log.notes,
+          created_at: log.created_at,
+          subActivities
+        };
+      });
+
+      const normalized = normalizeCalendarDays(formattedLogs, 7);
+      const scoreData = calculateWellnessScore(normalized);
+      return scoreData;
+    } catch (err) {
+      console.error('Error calculating patient composite score:', err.message);
+      return { computedWellnessScore: null };
+    }
+  };
+
+  // IDENTITY & WELLNESS RESOLVER: Hydrates cases with profile names and composite scores
+  const hydrateStudentData = async (casesArray) => {
     const enrichedCases = [];
     for (const item of casesArray) {
       if (item.user_id) {
@@ -91,9 +191,20 @@ const ProfessionalDashboard = () => {
           .select('full_name')
           .eq('id', item.user_id)
           .maybeSingle();
-        enrichedCases.push({ ...item, student_name: profileRow?.full_name || 'Anonymous Student' });
+
+        const wellnessData = await fetchPatientCompositeScore(item.user_id);
+
+        enrichedCases.push({
+          ...item,
+          student_name: profileRow?.full_name || 'Anonymous Student',
+          wellnessData
+        });
       } else {
-        enrichedCases.push({ ...item, student_name: 'Unknown Profile Link' });
+        enrichedCases.push({
+          ...item,
+          student_name: 'Unknown Profile Link',
+          wellnessData: { computedWellnessScore: null }
+        });
       }
     }
     return enrichedCases;
@@ -102,7 +213,6 @@ const ProfessionalDashboard = () => {
   // --- QUERY ACCESS REQUEST HANDSHAKES ---
   const fetchPractitionerCaseLoadsLedger = async () => {
     try {
-      // 1. Fetch pending care allocations assigned by admin and approved by student, awaiting professional sign-off
       const { data: pendingData, error: pendingErr } = await supabase
         .from('access_requests')
         .select('*')
@@ -112,7 +222,6 @@ const ProfessionalDashboard = () => {
 
       if (pendingErr) throw pendingErr;
 
-      // 2. Fetch fully activated monitoring cases requiring BOTH student and professional active consent checks
       const { data: activeData, error: activeErr } = await supabase
         .from('access_requests')
         .select('*')
@@ -123,8 +232,8 @@ const ProfessionalDashboard = () => {
 
       if (activeErr) throw activeErr;
 
-      const enrichedPending = await hydrateStudentNames(pendingData || []);
-      const enrichedActive = await hydrateStudentNames(activeData || []);
+      const enrichedPending = await hydrateStudentData(pendingData || []);
+      const enrichedActive = await hydrateStudentData(activeData || []);
       setPendingIntakeCases(enrichedPending);
       setActiveMonitoredCases(enrichedActive);
     } catch (err) {
@@ -144,58 +253,142 @@ const ProfessionalDashboard = () => {
     }
   }, [verificationStatus]);
 
-  // --- LIVE READ-ONLY DATA TELEMETRY LOGS INJECTOR ---
-  const loadStudentTelemetryStream = async (studentIdString, studentNameString) => {
-    setSelectedStudentId(studentIdString);
-    setSelectedStudentName(studentNameString);
-    setLoadingTelemetry(true);
-    try {
-      // Direct query fetch filtering mood entries exactly matching student profile_id column indices
-      const { data: moodLogs, error: moodErr } = await supabase
-        .from('mood_entry')
-        .select('id, mood_id, notes, created_at')
-        .eq('profile_id', studentIdString)
-        .order('created_at', { ascending: false })
-        .limit(7);
-
-      if (moodErr) throw moodErr;
-
-      const calculatedChartRows = [];
-      
-      // Loop and join cross-activity table constraints to populate parameters metrics rows
-      if (moodLogs && moodLogs.length > 0) {
-        for (const log of [...moodLogs].reverse()) {
-          const dateObj = new Date(log.created_at);
-          
-          const { data: activities } = await supabase
-            .from('activity_log')
-            .select('activity_type, sleep_activity(duration_hours), water_activity(glasses_count)')
-            .eq('mood_entry_id', log.id);
-
-          let sleepHours = 0;
-          let waterGlasses = 0;
-
-          activities?.forEach(act => {
-            const sleepData = Array.isArray(act.sleep_activity) ? act.sleep_activity[0] : act.sleep_activity;
-            const waterData = Array.isArray(act.water_activity) ? act.water_activity[0] : act.water_activity;
-            if (act.activity_type === 'Sleep' && sleepData) sleepHours = parseFloat(sleepData.duration_hours || 0);
-            if (act.activity_type === 'Water' && waterData) waterGlasses = parseInt(waterData.glasses_count || 0);
-          });
-
-          calculatedChartRows.push({
-            dateStr: dateObj.toLocaleDateString('default', { month: 'short', day: 'numeric' }),
-            'Mood Index': log.mood_id,
-            'Sleep Duration (hrs)': sleepHours,
-            'Hydration (Glasses)': waterGlasses,
-            notes: log.notes || "No text summary annotations typed."
-          });
-        }
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape') {
+        setExpandedPatientId(null);
       }
-      setStudentHistoricalLogs(calculatedChartRows);
-    } catch (err) {
-      console.error('Data pipeline connection block dropped:', err.message);
-    } finally {
-      setLoadingTelemetry(false);
+    };
+    if (expandedPatientId) {
+      window.addEventListener('keydown', handleKeyDown);
+    }
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [expandedPatientId]);
+
+  // --- BUILD PATIENT ANALYTICS CHART DATA STREAM ---
+  const buildPatientChartData = (moodLogs) => {
+    if (!moodLogs || moodLogs.length === 0) return { correlation: [], sleepSchedule: [], performance: [], notes: [] };
+
+    const correlation = [];
+    const sleepSchedule = [];
+    const performance = [];
+    const notes = [];
+
+    const sorted = [...moodLogs].reverse();
+
+    sorted.forEach((log) => {
+      const dateObj = new Date(log.created_at);
+      const dateStr = dateObj.toLocaleDateString('default', { month: 'short', day: 'numeric' });
+
+      let sleepHours = 0;
+      let waterGlasses = 0;
+      let exerciseMins = 0;
+      let studyMins = 0;
+      let sleepStartDecimal = null;
+      let sleepEndDecimal = null;
+
+      log.activity_log?.forEach((act) => {
+        if (act.activity_type === 'Sleep') {
+          const s = Array.isArray(act.sleep_activity) ? act.sleep_activity[0] : act.sleep_activity;
+          if (s) {
+            sleepHours = parseFloat(s.duration_hours || 0);
+            if (s.start_time) {
+              const [h, m] = s.start_time.split(':').map(Number);
+              let dec = h + m / 60;
+              if (h < 12) dec += 24;
+              sleepStartDecimal = dec;
+            }
+            if (s.end_time) {
+              const [h, m] = s.end_time.split(':').map(Number);
+              let dec = h + m / 60;
+              if (s.start_time) {
+                const [startH] = s.start_time.split(':').map(Number);
+                if (h < startH || (startH >= 12 && h < 12)) dec += 24;
+              }
+              sleepEndDecimal = dec;
+            }
+          }
+        }
+        if (act.activity_type === 'Water') {
+          const w = Array.isArray(act.water_activity) ? act.water_activity[0] : act.water_activity;
+          if (w) waterGlasses = parseInt(w.glasses_count || 0);
+        }
+        if (act.activity_type === 'Exercise') {
+          const e = Array.isArray(act.exercise_activity) ? act.exercise_activity[0] : act.exercise_activity;
+          if (e) exerciseMins = parseInt(e.duration_minutes || 0);
+        }
+        if (act.activity_type === 'Study') {
+          const st = Array.isArray(act.study_activity) ? act.study_activity[0] : act.study_activity;
+          if (st) studyMins = parseInt(st.duration_minutes || 0);
+        }
+      });
+
+      correlation.push({
+        dateStr,
+        'Mood Index': log.mood_id,
+        'Sleep Duration (hrs)': sleepHours,
+        'Hydration (Glasses)': waterGlasses
+      });
+
+      if (sleepStartDecimal !== null && sleepEndDecimal !== null) {
+        sleepSchedule.push({
+          dateStr,
+          sleepRange: [sleepStartDecimal, sleepEndDecimal],
+          duration: sleepHours
+        });
+      }
+
+      performance.push({
+        dateStr,
+        'Focus Study (mins)': studyMins,
+        'Exercise Time (mins)': exerciseMins
+      });
+
+      if (log.notes) {
+        notes.push({
+          dateStr,
+          mood_id: log.mood_id,
+          notes: log.notes
+        });
+      }
+    });
+
+    return { correlation, sleepSchedule, performance, notes };
+  };
+
+  // TOGGLE COLLAPSIBLE ANALYTICS DRAWER
+  const toggleExpandPatientCharts = async (studentId) => {
+    if (expandedPatientId === studentId) {
+      setExpandedPatientId(null);
+      return;
+    }
+    setExpandedPatientId(studentId);
+    if (!patientChartLogs[studentId]) {
+      setLoadingChartId(studentId);
+      try {
+        const { data: moodLogs } = await supabase
+          .from('mood_entry')
+          .select(`
+            id, mood_id, notes, created_at,
+            activity_log (
+              activity_type,
+              sleep_activity (duration_hours, start_time, end_time),
+              water_activity (glasses_count, liters_consumed),
+              exercise_activity (duration_minutes),
+              study_activity (duration_minutes)
+            )
+          `)
+          .eq('profile_id', studentId)
+          .order('created_at', { ascending: false })
+          .limit(14);
+
+        const chartData = buildPatientChartData(moodLogs || []);
+        setPatientChartLogs(prev => ({ ...prev, [studentId]: chartData }));
+      } catch (err) {
+        console.error('Error fetching patient chart telemetry stream:', err);
+      } finally {
+        setLoadingChartId(null);
+      }
     }
   };
 
@@ -204,7 +397,6 @@ const ProfessionalDashboard = () => {
     setIsProcessingAction(true);
     const finalStatusFlag = acceptedChoice ? 'active' : 'rejected';
     try {
-      // Pull target record context values to extract student account id safely
       const { data: requestRow, error: fetchErr } = await supabase
         .from('access_requests')
         .select('user_id')
@@ -222,7 +414,6 @@ const ProfessionalDashboard = () => {
         .eq('id', requestId);
       if (error) throw error;
 
-      // DISPATCH LOOP: Notify student that practitioner monitoring session initialization parameters are active
       if (acceptedChoice) {
         const { data: doctorProfile } = await supabase
           .from('profile')
@@ -241,7 +432,6 @@ const ProfessionalDashboard = () => {
       }
 
       alert(`Intake parameters resolved. Case status changed to: ${finalStatusFlag.toUpperCase()}`);
-      setSelectedStudentId(null);
       await fetchPractitionerCaseLoadsLedger();
     } catch (err) {
       alert('Handshake update transaction rejected: ' + err.message);
@@ -279,19 +469,24 @@ const ProfessionalDashboard = () => {
         <div className="sidebar-brand-box"><MindTrackLogo showText={true} /></div>
         <div style={{ padding: '12px 24px', fontSize: '11px', fontWeight: 700, color: '#9a8c98', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Clinical View</div>
         <ul className="sidebar-menu-links">
-          <li className={`sidebar-link-item ${activeSubTab === 'pending' ? 'active' : ''}`} onClick={() => { setActiveSubTab('pending'); setSelectedStudentId(null); }}>
-            <NavIcons.AddEntry /><span>Pending Case Intake</span>
+          <li className={`sidebar-link-item ${activeSubTab === 'active' ? 'active' : ''}`} onClick={() => setActiveSubTab('active')}>
+            <NavIcons.Analytics /><span>Active Monitored Cases ({activeMonitoredCases.length})</span>
           </li>
-          <li className={`sidebar-link-item ${activeSubTab === 'active' ? 'active' : ''}`} onClick={() => { setActiveSubTab('active'); setSelectedStudentId(null); }}>
-            <NavIcons.Analytics /><span>Active Monitoring</span>
+          <li className={`sidebar-link-item ${activeSubTab === 'pending' ? 'active' : ''}`} onClick={() => setActiveSubTab('pending')}>
+            <NavIcons.AddEntry /><span>Pending Case Intake ({pendingIntakeCases.length})</span>
           </li>
           <li className="sidebar-link-item" onClick={() => supabase.auth.signOut()} style={{ marginTop: 'auto', color: '#e53e3e' }}>
-             🚪 <span>Practitioner Exit</span>
+            <svg className="nav-svg-icon" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+              <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+              <polyline points="16 17 21 12 16 7" />
+              <line x1="21" y1="12" x2="9" y2="12" />
+            </svg>
+            <span>Practitioner Exit</span>
           </li>
         </ul>
       </aside>
 
-      {/* DASHBOARD CORE ROW VIEWPORT CHANNELS */}
+      {/* DASHBOARD CORE VIEWPORT */}
       <div className="dashboard-main-content">
         <nav className="top-navbar">
           <span className="user-greeting">Clinical Telemetry Desk: <strong>Verified Practitioner Session</strong></span>
@@ -300,101 +495,268 @@ const ProfessionalDashboard = () => {
 
         <main className="workspace-view">
           <div className="professional-panel-grid">
+            <h3 className="section-title" style={{ margin: '0 0 16px 0', fontSize: '16px', color: '#4a4e69', textAlign: 'left' }}>
+              {activeSubTab === 'pending' ? 'Assigned Care Allocations (Awaiting Acceptance)' : 'Monitored Patient Directory'}
+            </h3>
             
-            {/* SIDE PANEL A: CASES MATRIX REVIEWS LIST */}
             <div className="case-grid-deck">
-              <h3 className="section-title" style={{ margin: '0 0 10px 0', fontSize: '14px', color: '#9a8c98' }}>
-                {activeSubTab === 'pending' ? 'Assigned Care Allocations' : 'Your Monitored Student Cases'}
-              </h3>
-              
-              {activeSubTab === 'pending' && pendingIntakeCases.map(c => (
-                <div key={c.id} className="case-profile-card">
-                  <h4>{c.student_name}</h4>
-                  <p style={{ fontSize: '12.5px', color: '#6c757d', margin: '4px 0' }}>Monitoring assignment awaiting your case workspace verification acceptance sign-off parameters.</p>
-                  <div style={{ display: 'flex', gap: '8px', marginTop: '10px' }}>
-                    <button className="action-button-compact" style={{ padding: '6px 12px', fontSize: '12px' }} disabled={isProcessingAction} onClick={() => handleResolveIntakeHandshake(c.id, true)}>Accept Case</button>
-                    <button className="history-delete-btn" style={{ padding: '6px 12px', fontSize: '12px' }} disabled={isProcessingAction} onClick={() => handleResolveIntakeHandshake(c.id, false)}>Decline</button>
-                  </div>
-                </div>
-              ))}
+              {/* PENDING CASES */}
+              {activeSubTab === 'pending' && pendingIntakeCases.map(c => {
+                const score = c.wellnessData?.computedWellnessScore;
+                const scoreClass = score !== null && score !== undefined 
+                  ? (score >= 75 ? 'high' : score >= 50 ? 'medium' : 'low')
+                  : 'neutral';
 
-              {activeSubTab === 'active' && activeMonitoredCases.map(c => (
-                <div key={c.id} className="case-profile-card" style={{ cursor: 'pointer', transform: selectedStudentId === c.user_id ? 'scale(1.01)' : 'scale(1)', borderColor: selectedStudentId === c.user_id ? '#81b29a' : '#e9ecef' }} onClick={() => loadStudentTelemetryStream(c.user_id, c.student_name)}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <h4>{c.student_name}</h4>
-                    <span style={{ fontSize: '11px', color: '#81b29a', fontWeight: 700 }}>AUDITING ➔</span>
-                  </div>
-                  <p style={{ fontSize: '12px', marginTop: '4px', color: '#6c757d' }}>Consent complete. Click card node to stream long-term analytics historical logs entries charts.</p>
-                </div>
-              ))}
+                return (
+                  <div key={c.id} className="case-profile-card">
+                    <div className="case-card-header">
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                        <div className="patient-avatar-circle">
+                          {c.student_name ? c.student_name.charAt(0).toUpperCase() : 'P'}
+                        </div>
+                        <div>
+                          <h4 style={{ margin: 0, fontSize: '15px', fontWeight: 700, color: '#4a4e69' }}>{c.student_name}</h4>
+                          <span style={{ fontSize: '11px', color: '#9a8c98' }}>Pending Intake</span>
+                        </div>
+                      </div>
 
-              {((activeSubTab === 'pending' && pendingIntakeCases.length === 0) || (activeSubTab === 'active' && activeMonitoredCases.length === 0)) && (
-                <p style={{ color: '#8d99ae', fontSize: '13px', fontStyle: 'italic', padding: '20px', background: '#ffffff', borderRadius: '8px', border: '1px solid #e9ecef', textAlign: 'center' }}>No record mappings found.</p>
-              )}
-            </div>
+                      <div className={`composite-score-badge ${scoreClass}`}>
+                        <span className="score-number">{score !== null && score !== undefined ? `${score}%` : '--'}</span>
+                        <span className="score-label">Wellness Score</span>
+                      </div>
+                    </div>
 
-            {/* MAIN PANEL B: LIVE DATA TELEMETRY REVIEW INTERFACE VISUALIZER */}
-            <div className="telemetry-inspection-workspace">
-              {!selectedStudentId ? (
-                <div style={{ height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: '#8d99ae', minHeight: '340px' }}>
-                  <DashboardIcons.Insights style={{ width: '48px', height: '48px', strokeWidth: 1.5, marginBottom: '12px' }} />
-                  <p style={{ margin: 0, fontStyle: 'italic', fontSize: '14px' }}>Select an active student case node from the left pane layout matrix to run read-only trend audits.</p>
-                </div>
-              ) : loadingTelemetry ? (
-                <p style={{ color: '#8d99ae', padding: '60px' }}>Compiling remote chart data indices stream...</p>
-              ) : studentHistoricalLogs.length === 0 ? (
-                <div style={{ height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: '#8d99ae', minHeight: '340px' }}>
-                  <p style={{ margin: 0, fontStyle: 'italic', fontSize: '14px' }}>This student has granted permission but has not logged any tracking parameters entries inside the ledger yet.</p>
-                </div>
-              ) : (
-                <div>
-                  <div className="clinical-badge-alert">
-                    🛡️ <strong>Ethical Compliance Enforcement (Rule PR1 & ET1):</strong> You are entering a read-only biometric review viewport window. Under health data privacy laws, data modifications, drop operations, or diagnostic text writes are strictly prohibited.
-                  </div>
 
-                  <div className="workspace-header" style={{ borderBottom: '1px solid #e9ecef', paddingBottom: '14px', marginBottom: '24px' }}>
-                    <div style={{ textAlign: 'left' }}>
-                      <h3 style={{ margin: 0, fontSize: '18px', fontWeight: 700, color: '#4a4e69' }}>Longitudinal Data Stream: {selectedStudentName}</h3>
-                      <span style={{ fontSize: '11px', color: '#9a8c98', fontWeight: 600 }}>SINGLE PATIENT RECORD VIEW MATRIX</span>
+                    <p style={{ fontSize: '12.5px', color: '#6c757d', margin: 0 }}>
+                      Monitoring assignment awaiting your case workspace verification acceptance.
+                    </p>
+
+                    <div style={{ display: 'flex', gap: '8px', marginTop: '4px' }}>
+                      <button className="action-button-compact" style={{ padding: '8px 16px', fontSize: '12px', flex: 1 }} disabled={isProcessingAction} onClick={() => handleResolveIntakeHandshake(c.id, true)}>Accept Case</button>
+                      <button className="history-delete-btn" style={{ padding: '8px 16px', fontSize: '12px', flex: 1 }} disabled={isProcessingAction} onClick={() => handleResolveIntakeHandshake(c.id, false)}>Decline</button>
                     </div>
                   </div>
+                );
+              })}
 
-                  {/* CHART VP PORT */}
-                  <div style={{ width: '100%', height: '280px', minWidth: 0, marginBottom: '24px' }}>
-                    <ResponsiveContainer width="100%" height="100%">
-                      <ComposedChart data={studentHistoricalLogs} margin={{ top: 10, right: 5, left: -25, bottom: 0 }}>
-                        <CartesianGrid strokeDasharray="3 3" stroke="#f1f3f5" strokeOpacity={0.4} />
-                        <XAxis dataKey="dateStr" tick={{ fontSize: 11, fill: '#9a8c98' }} axisLine={false} tickLine={false} />
-                        <YAxis yAxisId="left" domain={[1, 5]} tickCount={5} tick={{ fontSize: 11, fill: '#4a4e69' }} axisLine={false} tickLine={false} />
-                        <YAxis yAxisId="right" orientation="right" domain={[0, 'auto']} tick={{ fontSize: 11, fill: '#778da9' }} axisLine={false} tickLine={false} />
-                        
-                        <Tooltip content={<CustomClinicalTooltip />} />
-                        <Legend wrapperStyle={{ fontSize: 11, paddingTop: 10 }} />
-                        <ReferenceArea y1={7} y2={9} yAxisId="right" fill="#778da9" fillOpacity={0.04} />
-                        
-                        <Bar yAxisId="right" dataKey="Hydration (Glasses)" name="Fluid Log Profile" fill="#629098" opacity={0.25} barSize={18} radius={[4, 4, 0, 0]} />
-                        <Line yAxisId="left" type="monotone" dataKey="Mood Index" name="Patient Mood Trend" stroke="#81b29a" strokeWidth={3} dot={{ r: 4, fill: '#ffffff', strokeWidth: 1.5 }} />
-                        <Line yAxisId="right" type="monotone" dataKey="Sleep Duration (hrs)" name="Rest Duration Parameters" stroke="#778da9" strokeWidth={2} strokeDasharray="4 4" dot={false} />
-                      </ComposedChart>
-                    </ResponsiveContainer>
-                  </div>
+              {/* ACTIVE MONITORED CASES */}
+              {activeSubTab === 'active' && activeMonitoredCases.map(c => {
+                const score = c.wellnessData?.computedWellnessScore;
+                const scoreClass = score !== null && score !== undefined 
+                  ? (score >= 75 ? 'high' : score >= 50 ? 'medium' : 'low')
+                  : 'neutral';
+                const isExpanded = expandedPatientId === c.user_id;
 
-                  {/* DYNAMIC READ-ONLY JOURNAL NOTES DECK */}
-                  <h4 style={{ fontSize: '13px', color: '#9a8c98', margin: '24px 0 12px 0', textTransform: 'uppercase', letterSpacing: '0.5px', textAlign: 'left' }}>Patient Behavioral Context Notes</h4>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', maxHeight: '200px', overflowY: 'auto' }}>
-                    {studentHistoricalLogs.map((log, idx) => (
-                      <div key={idx} className="modal-notes-block" style={{ margin: 0, fontSize: '13px', borderLeftColor: moodMetaConfig[log['Mood Index']]?.color || '#778da9', textAlign: 'left' }}>
-                        <strong>{log.dateStr} ({moodMetaConfig[log['Mood Index']]?.name || 'Logged'}):</strong> "{log.notes}"
+                return (
+                  <div key={c.id} className="case-profile-card">
+                    <div className="case-card-header">
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                        <div className="patient-avatar-circle">
+                          {c.student_name ? c.student_name.charAt(0).toUpperCase() : 'P'}
+                        </div>
+                        <div>
+                          <h4 style={{ margin: 0, fontSize: '15px', fontWeight: 700, color: '#4a4e69' }}>{c.student_name}</h4>
+                          <span style={{ fontSize: '11px', color: '#81b29a', fontWeight: 700 }}>● Monitored Patient</span>
+                        </div>
                       </div>
-                    ))}
+
+                      <div className={`composite-score-badge ${scoreClass}`}>
+                        <span className="score-number">{score !== null && score !== undefined ? `${score}%` : '--'}</span>
+                        <span className="score-label">Wellness Score</span>
+                      </div>
+                    </div>
+
+                    {score !== null && score !== undefined && (
+                      <div className="patient-sub-indices-grid">
+                        <div className="sub-pill">
+                          <span className="pill-title">Mood (Mc)</span>
+                          <span className="pill-value">{Math.round((c.wellnessData.mc || 0) * 100)}%</span>
+                        </div>
+                        <div className="sub-pill">
+                          <span className="pill-title">Sleep (Sc)</span>
+                          <span className="pill-value">{Math.round((c.wellnessData.sc || 0) * 100)}%</span>
+                        </div>
+                        <div className="sub-pill">
+                          <span className="pill-title">Water (Hc)</span>
+                          <span className="pill-value">{Math.round((c.wellnessData.hc || 0) * 100)}%</span>
+                        </div>
+                        <div className="sub-pill">
+                          <span className="pill-title">Exercise (Ec)</span>
+                          <span className="pill-value">{Math.round((c.wellnessData.ec || 0) * 100)}%</span>
+                        </div>
+                      </div>
+                    )}
+
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', color: '#6c757d', borderTop: '1px solid #edf2f7', paddingTop: '10px', marginTop: '4px' }}>
+                      <span>Avg Sleep: <strong>{c.wellnessData?.avgSleep || 0} hrs/day</strong></span>
+                      <span>Avg Water: <strong>{c.wellnessData?.avgWater || 0} glasses/day</strong></span>
+                    </div>
+
+                    {/* ANALYTICS CHARTS MODAL TRIGGER BUTTON */}
+                    <button 
+                      className="chart-toggle-btn"
+                      onClick={() => toggleExpandPatientCharts(c.user_id)}
+                    >
+                      📊 View Analytics Dashboard
+                    </button>
                   </div>
-                </div>
+                );
+              })}
+
+              {((activeSubTab === 'pending' && pendingIntakeCases.length === 0) || (activeSubTab === 'active' && activeMonitoredCases.length === 0)) && (
+                <p style={{ color: '#8d99ae', fontSize: '13px', fontStyle: 'italic', padding: '24px', background: '#ffffff', borderRadius: '12px', border: '1px solid #e9ecef', textAlign: 'center', gridColumn: '1 / -1' }}>
+                  No patient record mappings found under {activeSubTab === 'pending' ? 'pending intake' : 'active monitored cases'}.
+                </p>
               )}
             </div>
-
           </div>
         </main>
       </div>
+
+      {/* FLOATING ANALYTICS WINDOW / MODAL */}
+      {expandedPatientId && (() => {
+        const selectedPatient = activeMonitoredCases.find(c => c.user_id === expandedPatientId);
+        if (!selectedPatient) return null;
+        const score = selectedPatient.wellnessData?.computedWellnessScore;
+        const scoreClass = score !== null && score !== undefined 
+          ? (score >= 75 ? 'high' : score >= 50 ? 'medium' : 'low')
+          : 'neutral';
+        const logsData = patientChartLogs[expandedPatientId];
+
+        return (
+          <div className="analytics-modal-overlay" onClick={() => setExpandedPatientId(null)}>
+            <div className="analytics-modal-card" onClick={(e) => e.stopPropagation()}>
+              {/* MODAL HEADER */}
+              <div className="analytics-modal-header">
+                <div className="analytics-modal-title-group">
+                  <div className="patient-avatar-circle" style={{ width: '40px', height: '40px', fontSize: '16px' }}>
+                    {selectedPatient.student_name ? selectedPatient.student_name.charAt(0).toUpperCase() : 'P'}
+                  </div>
+                  <div>
+                    <h3 style={{ margin: 0, fontSize: '16px', fontWeight: 700, color: '#1e293b' }}>
+                      📊 Analytics Dashboard: {selectedPatient.student_name}
+                    </h3>
+                    <span style={{ fontSize: '11px', color: '#64748b' }}>
+                      Clinical Telemetry Stream & Detailed Correlation Charts
+                    </span>
+                  </div>
+                </div>
+
+                <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+                  <div className={`composite-score-badge ${scoreClass}`} style={{ padding: '4px 10px', minWidth: '70px' }}>
+                    <span className="score-number" style={{ fontSize: '15px' }}>{score !== null && score !== undefined ? `${score}%` : '--'}</span>
+                    <span className="score-label" style={{ fontSize: '9px' }}>Wellness Score</span>
+                  </div>
+                  <button 
+                    className="analytics-modal-close-btn"
+                    onClick={() => setExpandedPatientId(null)}
+                    title="Close Window (Esc)"
+                  >
+                    ✕
+                  </button>
+                </div>
+              </div>
+
+              {/* MODAL BODY */}
+              <div className="analytics-modal-body">
+                {loadingChartId === expandedPatientId ? (
+                  <div style={{ textAlign: 'center', padding: '48px 0', color: '#64748b' }}>
+                    <div style={{ fontSize: '24px', marginBottom: '8px' }}>⏳</div>
+                    <p style={{ margin: 0, fontSize: '14px', fontWeight: 600 }}>Compiling patient telemetry chart streams...</p>
+                  </div>
+                ) : !logsData || !logsData.correlation || logsData.correlation.length === 0 ? (
+                  <div style={{ textAlign: 'center', padding: '48px 0', color: '#64748b' }}>
+                    <div style={{ fontSize: '24px', marginBottom: '8px' }}>📭</div>
+                    <p style={{ margin: 0, fontSize: '14px', fontWeight: 600 }}>No historical tracking logs recorded yet by this patient.</p>
+                  </div>
+                ) : (
+                  <>
+                    {/* CHART 1: Mood, Sleep & Hydration Correlation */}
+                    <div className="analytics-chart-section">
+                      <h5 className="analytics-chart-title">
+                        📈 1. Mood, Sleep & Hydration Correlation
+                      </h5>
+                      <div style={{ width: '100%', height: '280px' }}>
+                        <ResponsiveContainer width="100%" height="100%">
+                          <ComposedChart data={logsData.correlation} margin={{ top: 15, right: 15, left: -15, bottom: 5 }}>
+                            <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" opacity={0.7} />
+                            <XAxis dataKey="dateStr" tick={{ fontSize: 11, fill: '#64748b' }} axisLine={false} tickLine={false} />
+                            <YAxis yAxisId="left" domain={[1, 5]} tickCount={5} tick={{ fontSize: 11, fill: '#334155' }} axisLine={false} tickLine={false} />
+                            <YAxis yAxisId="right" orientation="right" domain={[0, 'auto']} tick={{ fontSize: 11, fill: '#475569' }} axisLine={false} tickLine={false} />
+                            <Tooltip content={<CustomClinicalTooltip />} />
+                            <Legend wrapperStyle={{ fontSize: 11, paddingTop: 8 }} />
+                            <Bar yAxisId="right" dataKey="Hydration (Glasses)" name="Water Intake" fill="#629098" opacity={0.35} barSize={18} radius={[4, 4, 0, 0]} />
+                            <Line yAxisId="left" type="monotone" dataKey="Mood Index" name="Tracked Mood" stroke="#81b29a" strokeWidth={3} dot={{ r: 4, fill: '#ffffff', strokeWidth: 2 }} />
+                            <Line yAxisId="right" type="monotone" dataKey="Sleep Duration (hrs)" name="Rest Duration" stroke="#778da9" strokeWidth={2.5} strokeDasharray="4 4" dot={false} />
+                          </ComposedChart>
+                        </ResponsiveContainer>
+                      </div>
+                    </div>
+
+                    {/* CHART 2: Sleep Schedule Consistency */}
+                    {logsData.sleepSchedule && logsData.sleepSchedule.length > 0 && (
+                      <div className="analytics-chart-section">
+                        <h5 className="analytics-chart-title">
+                          🌙 2. Sleep Schedule Consistency
+                        </h5>
+                        <div style={{ width: '100%', height: '240px' }}>
+                          <ResponsiveContainer width="100%" height="100%">
+                            <BarChart data={logsData.sleepSchedule} margin={{ top: 15, right: 15, left: -10, bottom: 5 }}>
+                              <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" opacity={0.7} />
+                              <XAxis dataKey="dateStr" tick={{ fontSize: 11, fill: '#64748b' }} axisLine={false} tickLine={false} />
+                              <YAxis tickFormatter={formatDecimalHourTo12h} tick={{ fontSize: 10, fill: '#334155' }} axisLine={false} tickLine={false} />
+                              <Tooltip content={<CustomSleepTooltip />} />
+                              <Bar dataKey="sleepRange" name="Sleep Window" fill="#778da9" radius={[4, 4, 4, 4]} barSize={20} />
+                            </BarChart>
+                          </ResponsiveContainer>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* CHART 3: Focus Workload vs Physical Activation */}
+                    {logsData.performance && logsData.performance.length > 0 && (
+                      <div className="analytics-chart-section">
+                        <h5 className="analytics-chart-title">
+                          ⚡ 3. Focus Workload vs. Physical Exercise
+                        </h5>
+                        <div style={{ width: '100%', height: '240px' }}>
+                          <ResponsiveContainer width="100%" height="100%">
+                            <ComposedChart data={logsData.performance} margin={{ top: 15, right: 15, left: -15, bottom: 5 }}>
+                              <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" opacity={0.7} />
+                              <XAxis dataKey="dateStr" tick={{ fontSize: 11, fill: '#64748b' }} axisLine={false} tickLine={false} />
+                              <YAxis tick={{ fontSize: 11, fill: '#334155' }} axisLine={false} tickLine={false} />
+                              <Tooltip />
+                              <Legend wrapperStyle={{ fontSize: 11, paddingTop: 8 }} />
+                              <Bar dataKey="Focus Study (mins)" name="Study Block" fill="#f39c12" opacity={0.65} barSize={18} radius={[4, 4, 0, 0]} />
+                              <Line type="monotone" dataKey="Exercise Time (mins)" name="Exercise Time" stroke="#10b981" strokeWidth={2.5} dot={{ r: 4, fill: '#ffffff' }} />
+                            </ComposedChart>
+                          </ResponsiveContainer>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* PATIENT REFLECTION NOTES */}
+                    {logsData.notes && logsData.notes.length > 0 && (
+                      <div className="analytics-chart-section">
+                        <h5 className="analytics-chart-title">
+                          📝 Patient Reflection Notes
+                        </h5>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', maxHeight: '200px', overflowY: 'auto' }}>
+                          {logsData.notes.map((n, idx) => (
+                            <div key={idx} className="modal-notes-block" style={{ margin: 0, fontSize: '13px', textAlign: 'left', padding: '10px 14px', borderRadius: '8px', background: '#f8fafc', border: '1px solid #e2e8f0' }}>
+                              <strong style={{ color: '#475569' }}>{n.dateStr}:</strong> "{n.notes}"
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 };
