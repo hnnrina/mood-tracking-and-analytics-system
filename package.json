@@ -1,4 +1,5 @@
 {
+  "type": "module",
   "dependencies": {
     "@supabase/supabase-js": "^2.106.2",
     "react-router-dom": "^7.16.0"
